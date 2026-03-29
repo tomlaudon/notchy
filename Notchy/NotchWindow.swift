@@ -367,7 +367,7 @@ class NotchWindow: NSPanel {
     // MARK: - Hover grow / shrink
 
     private static let hoverGrowX: CGFloat = 0 + NotchPillView.earRadius * 2  // extra width for ear protrusions
-    private static let hoverGrowY: CGFloat = 0
+    private static let hoverGrowY: CGFloat = 2
 
     /// Applies hover grow offset to any frame.
     private func applyHoverGrow(to rect: NSRect) -> NSRect {
@@ -389,7 +389,7 @@ class NotchWindow: NSPanel {
         // Animate ears growing outward from body edges
         let targetProtrusion = NotchPillView.earRadius
         let startTime = CACurrentMediaTime()
-        let duration: Double = 0.05
+        let duration: Double = 0.15
         let displayLink = CVDisplayLinkWrapper { [weak self] in
             guard let self else { return false }
             let elapsed = CACurrentMediaTime() - startTime
@@ -630,7 +630,7 @@ struct NotchPillContent: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
-        .offset(y: -2)//isHovering ? -3 : -2)
+        .offset(y: isHovering ? -3 : -2)
         .onChange(of: displayState) {
             NotificationCenter.default.post(name: .NotchyNotchStatusChanged, object: nil)
         }

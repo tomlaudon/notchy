@@ -1,5 +1,6 @@
 # Xcode
-Build/
+# Build/ is tracked intentionally (public download artifact)
+!Build/
 DerivedData/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
