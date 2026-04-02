@@ -226,8 +226,15 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
         guard let dir = directory,
               let terminal = source as? ClickThroughTerminalView,
               let sessionId = terminal.sessionId else { return }
+        // SwiftTerm may report file:// URLs — convert to plain path
+        let cleanDir: String
+        if dir.hasPrefix("file://"), let url = URL(string: dir) {
+            cleanDir = url.path
+        } else {
+            cleanDir = dir
+        }
         DispatchQueue.main.async {
-            SessionStore.shared.updateWorkingDirectory(sessionId, directory: dir)
+            SessionStore.shared.updateWorkingDirectory(sessionId, directory: cleanDir)
         }
     }
 

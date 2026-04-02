@@ -50,7 +50,17 @@ struct TerminalSession: Identifiable {
         self.id = persisted.id
         self.projectName = persisted.projectName
         self.projectPath = persisted.projectPath
-        self.workingDirectory = persisted.workingDirectory
+        // Fix file:// URLs that may have been persisted by earlier versions
+        var dir = persisted.workingDirectory
+        if dir.hasPrefix("file://"), let url = URL(string: dir) {
+            dir = url.path
+        }
+        // If workspace exists, prefer its repoPath over possibly stale workingDirectory
+        if let wsId = persisted.workspaceId,
+           let ws = WorkspaceStore.shared.workspaces.first(where: { $0.id == wsId }) {
+            dir = ws.repoPath
+        }
+        self.workingDirectory = dir
         self.hasStarted = false
         self.terminalStatus = .idle
         self.generation = 0
