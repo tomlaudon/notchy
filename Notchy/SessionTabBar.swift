@@ -43,6 +43,26 @@ struct SessionTab: View {
 
     private var name: String { session.projectName }
 
+    /// Background tint for active tab based on status
+    private var statusBackgroundColor: Color {
+        switch terminalStatus {
+        case .working: return .yellow
+        case .waitingForInput: return .red
+        case .taskCompleted: return .green
+        case .idle, .interrupted: return .accentColor
+        }
+    }
+
+    /// Bottom accent bar color — always visible, shows status even on inactive tabs
+    private var statusAccentColor: Color {
+        switch terminalStatus {
+        case .working: return .yellow.opacity(0.8)
+        case .waitingForInput: return .red.opacity(0.9)
+        case .taskCompleted: return .green.opacity(0.7)
+        case .idle, .interrupted: return isActive ? .accentColor.opacity(0.3) : .clear
+        }
+    }
+
     private func attemptClose() {
         let dir = session.workingDirectory
         DispatchQueue.global(qos: .userInitiated).async {
@@ -106,13 +126,20 @@ struct SessionTab: View {
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isActive
-                    ? Color.accentColor.opacity(0.15)
+                    ? statusBackgroundColor.opacity(0.15)
                     : isHovering ? Color.white.opacity(0.05) : Color.clear)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(isActive ? Color.accentColor.opacity(0.3) : Color.clear, lineWidth: 1)
+                .stroke(isActive ? statusBackgroundColor.opacity(0.4) : Color.clear, lineWidth: 1)
         )
+        .overlay(alignment: .bottom) {
+            // Colored bottom accent bar shows status at a glance
+            RoundedRectangle(cornerRadius: 1)
+                .fill(statusAccentColor)
+                .frame(height: 2)
+                .padding(.horizontal, 4)
+        }
         .onHover { hovering in
             isHovering = hovering
             if hovering {

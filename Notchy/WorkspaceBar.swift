@@ -17,6 +17,37 @@ struct WorkspaceBar: View {
         workspaceStore.activeWorkspace?.color ?? .gray
     }
 
+    /// Mini status dots for each session — visible when panel is collapsed
+    private var sessionStatusDots: some View {
+        HStack(spacing: 4) {
+            ForEach(sessionStore.visibleSessions) { session in
+                Group {
+                    switch session.terminalStatus {
+                    case .working:
+                        TabSpinnerView()
+                            .frame(width: 6, height: 6)
+                    case .waitingForInput:
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 6, height: 6)
+                    case .taskCompleted:
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                    case .idle, .interrupted:
+                        Circle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(width: 6, height: 6)
+                    }
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3)
+                        .stroke(session.id == sessionStore.activeSessionId ? Color.white.opacity(0.5) : Color.clear, lineWidth: 1)
+                )
+            }
+        }
+    }
+
     var body: some View {
         Menu {
             // Existing workspaces — just click to switch
@@ -61,6 +92,8 @@ struct WorkspaceBar: View {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 8, weight: .bold))
                 }
+
+                sessionStatusDots
 
                 Spacer()
 
