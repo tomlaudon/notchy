@@ -131,8 +131,34 @@ class ClickThroughTerminalView: LocalProcessTerminalView {
     }
 
     private func evaluateStatus(for id: UUID) {
-        // Auto-accept is now handled by launching Claude with --dangerously-skip-permissions
-        // No need for fragile text-matching of permission prompts
+        guard let session = SessionStore.shared.sessions.first(where: { $0.id == id }),
+              session.autoAcceptEnabled else { return }
+        checkAutoAccept(for: id)
+    }
+
+    /// Detects Claude Code permission/confirmation prompts and auto-accepts them.
+    /// Catches: tool permission prompts, bash command confirmations,
+    /// --dangerously-skip-permissions confirmation, and trust prompts.
+    private func checkAutoAccept(for id: UUID) {
+        guard let fullText = extractFullVisibleText() else { return }
+
+        let shouldAccept =
+            // Standard permission prompt: "Allow" + accept option
+            ((fullText.contains("Allow") || fullText.contains("allow"))
+                && (fullText.contains("Yes") || fullText.contains("(y)") || fullText.contains("to allow")))
+            // Bash command confirmation
+            || fullText.contains("Do you want to proceed?")
+            // --dangerously-skip-permissions confirmation
+            || fullText.contains("I understand the risks")
+            // Trust/workspace prompt
+            || fullText.contains("Do you trust")
+            || fullText.contains("Trust this project")
+
+        if shouldAccept {
+            DispatchQueue.main.async { [weak self] in
+                self?.send(txt: "y")
+            }
+        }
     }
 }
 
