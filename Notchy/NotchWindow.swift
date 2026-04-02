@@ -147,7 +147,8 @@ class NotchWindow: NSPanel {
     }
 
     private func updateExpansionState() {
-        let shouldExpand = NotchDisplayState.current != .idle
+        // Always expand when there are sessions so tab status is visible
+        let shouldExpand = !SessionStore.shared.sessions.isEmpty
 
         if shouldExpand && !isExpanded {
             collapseDebounceTimer?.invalidate()
@@ -177,7 +178,9 @@ class NotchWindow: NSPanel {
         guard let screen = NSScreen.builtIn else { return }
         let screenFrame = screen.frame
 
-        let targetWidth: CGFloat = notchWidth + 80
+        // Scale width based on number of tabs
+        let tabCount = CGFloat(max(SessionStore.shared.sessions.count, 1))
+        let targetWidth: CGFloat = notchWidth + 60 + (tabCount * 80)
         var targetFrame = NSRect(
             x: screenFrame.midX - targetWidth / 2,
             y: screenFrame.maxY - notchHeight,
@@ -580,60 +583,67 @@ enum NotchDisplayState: Equatable {
 struct NotchPillContent: View {
     var isHovering: Bool = false
     private var displayState: NotchDisplayState { .current }
+    private var sessions: [TerminalSession] { SessionStore.shared.sessions }
 
     var body: some View {
-        ZStack {
-            HStack {
-
-                if displayState != .idle {
-
-                    Rectangle()
-                        .foregroundColor(.clear)
-                        .frame(width: 18, height: 18)
-                        .overlay(alignment: .leading) {
-                            BotFaceView() //state: displayState
-                                .frame(width: 20, height: 15)
-                                .mask(RoundedRectangle(cornerRadius: 5))
+        HStack(spacing: 6) {
+            ForEach(sessions) { session in
+                HStack(spacing: 3) {
+                    // Status icon per tab
+                    Group {
+                        switch session.terminalStatus {
+                        case .working:
+                            SpinnerView()
+                                .frame(width: 8, height: 8)
+                        case .waitingForInput:
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.red)
+                        case .taskCompleted:
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.green)
+                        case .idle, .interrupted:
+                            Circle()
+                                .fill(Color.gray.opacity(0.5))
+                                .frame(width: 6, height: 6)
                         }
-//                        .offset(x: 2)
-//                        .padding(.leading, -2)
-
-
-                    Spacer()
-
-                    switch displayState {
-                    case .taskCompleted:
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.green)
-                            .transition(.scale.combined(with: .opacity))
-                    case .waitingForInput:
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.yellow)
-                            .transition(.scale.combined(with: .opacity))
-                    case .working:
-                        SpinnerView()
-                            .frame(width: 14, height: 14)
-                            .transition(.scale.combined(with: .opacity))
-                    case .idle:
-                        EmptyView()
                     }
+                    // Tab name
+                    Text(session.projectName)
+                        .font(.system(size: 9, weight: session.id == SessionStore.shared.activeSessionId ? .bold : .medium))
+                        .lineLimit(1)
+                        .foregroundColor(notchStatusColor(for: session.terminalStatus))
+                }
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(notchStatusColor(for: session.terminalStatus).opacity(0.15))
+                )
+
+                if session.id != sessions.last?.id {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.15))
+                        .frame(width: 1, height: 12)
                 }
             }
-            .animation(.easeInOut(duration: 0.25), value: displayState)
-            .padding(.horizontal, 12 + (isHovering ? NotchPillView.earRadius : 0))
-
-            // Debug: show current displayState
-//            Text("\(String(describing: displayState))")
-//                .font(.system(size: 10, weight: .medium, design: .monospaced))
-//                .foregroundColor(.white)
         }
+        .padding(.horizontal, 8 + (isHovering ? NotchPillView.earRadius : 0))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
         .offset(y: isHovering ? -3 : -2)
         .onChange(of: displayState) {
             NotificationCenter.default.post(name: .NotchyNotchStatusChanged, object: nil)
+        }
+    }
+
+    private func notchStatusColor(for status: TerminalStatus) -> Color {
+        switch status {
+        case .working: return .yellow
+        case .waitingForInput: return .red
+        case .taskCompleted: return .green
+        case .idle, .interrupted: return .white.opacity(0.6)
         }
     }
 }
