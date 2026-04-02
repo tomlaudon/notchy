@@ -39,8 +39,23 @@ struct SessionTab: View {
     @State private var renameText = ""
     @State private var latestCheckpoint: Checkpoint?
     @State private var showRestoreConfirmation = false
+    @State private var showDirtyCloseWarning = false
 
     private var name: String { session.projectName }
+
+    private func attemptClose() {
+        let dir = session.workingDirectory
+        DispatchQueue.global(qos: .userInitiated).async {
+            let isDirty = TerminalManager.shared.hasUncommittedChanges(in: dir)
+            DispatchQueue.main.async {
+                if isDirty {
+                    showDirtyCloseWarning = true
+                } else {
+                    onClose()
+                }
+            }
+        }
+    }
 
     private func refreshLatestCheckpoint() {
         guard let dir = session.projectPath else { return }
@@ -107,7 +122,7 @@ struct SessionTab: View {
             }
         }
         .onTapGesture(perform: onSelect)
-        .overlay(MiddleClickView { onClose() })
+        .overlay(MiddleClickView { attemptClose() })
         .contextMenu {
 //            Button("Save Checkpoint") {
 //                SessionStore.shared.createCheckpointForActiveSession()
@@ -132,7 +147,7 @@ struct SessionTab: View {
             }
 
             Button("Close", role: .destructive) {
-                onClose()
+                attemptClose()
             }
         }
         .onAppear {
@@ -164,11 +179,22 @@ struct SessionTab: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .alert("Uncommitted Changes", isPresented: $showDirtyCloseWarning) {
+            Button("Close Anyway", role: .destructive) {
+                onClose()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This tab has uncommitted changes that will be lost if you close it.")
+        }
         .onChange(of: showRenameDialog) {
-            SessionStore.shared.isShowingDialog = showRenameDialog || showRestoreConfirmation
+            SessionStore.shared.isShowingDialog = showRenameDialog || showRestoreConfirmation || showDirtyCloseWarning
         }
         .onChange(of: showRestoreConfirmation) {
-            SessionStore.shared.isShowingDialog = showRenameDialog || showRestoreConfirmation
+            SessionStore.shared.isShowingDialog = showRenameDialog || showRestoreConfirmation || showDirtyCloseWarning
+        }
+        .onChange(of: showDirtyCloseWarning) {
+            SessionStore.shared.isShowingDialog = showRenameDialog || showRestoreConfirmation || showDirtyCloseWarning
         }
     }
 }

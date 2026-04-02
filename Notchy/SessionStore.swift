@@ -307,6 +307,13 @@ class SessionStore {
     func toggleAutoAccept(_ id: UUID) {
         guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
         sessions[index].autoAcceptEnabled.toggle()
+        // Ask Claude to save context, then restart with/without --dangerously-skip-permissions
+        TerminalManager.shared.saveContextAndDestroy(sessionId: id)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12.0) { [weak self] in
+            guard let self, let idx = self.sessions.firstIndex(where: { $0.id == id }) else { return }
+            self.sessions[idx].terminalStatus = .idle
+            self.sessions[idx].generation += 1
+        }
     }
 
     func renameSession(_ id: UUID, to newName: String) {

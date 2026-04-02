@@ -131,27 +131,8 @@ class ClickThroughTerminalView: LocalProcessTerminalView {
     }
 
     private func evaluateStatus(for id: UUID) {
-        guard let session = SessionStore.shared.sessions.first(where: { $0.id == id }),
-              session.autoAcceptEnabled else { return }
-        checkAutoAccept(for: id)
-    }
-
-    /// Detects Claude Code permission prompts and auto-sends 'y' to accept them.
-    private func checkAutoAccept(for id: UUID) {
-        guard let fullText = extractFullVisibleText() else { return }
-
-        // Claude Code shows "Allow" / "allow" when waiting for tool permission,
-        // along with "Yes" option. Also detect "Do you want to proceed?" patterns.
-        // The key indicator is the presence of permission-prompt UI elements.
-        let isPermissionPrompt =
-            (fullText.contains("Allow") || fullText.contains("allow"))
-            && (fullText.contains("Yes") || fullText.contains("(y)") || fullText.contains("to allow"))
-
-        if isPermissionPrompt {
-            DispatchQueue.main.async { [weak self] in
-                self?.send(txt: "y")
-            }
-        }
+        // Auto-accept is now handled by launching Claude with --dangerously-skip-permissions
+        // No need for fragile text-matching of permission prompts
     }
 }
 
@@ -160,7 +141,7 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
 
     private var terminals: [UUID: LocalProcessTerminalView] = [:]
 
-    func terminal(for sessionId: UUID, workingDirectory: String, workspaceId: UUID? = nil) -> LocalProcessTerminalView {
+    func terminal(for sessionId: UUID, workingDirectory: String, workspaceId: UUID? = nil, autoAccept: Bool = false) -> LocalProcessTerminalView {
         if let existing = terminals[sessionId] {
             return existing
         }
@@ -185,7 +166,8 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
         )
 
         let escapedDir = shellEscape(workingDirectory)
-        terminal.send(txt: "cd \(escapedDir) && clear && claude\r")
+        let claudeCmd = autoAccept ? "claude --dangerously-skip-permissions" : "claude"
+        terminal.send(txt: "cd \(escapedDir) && clear && \(claudeCmd)\r")
 
         // Auto-accept the trust prompt after claude starts
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
@@ -235,11 +217,53 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
         terminals.removeValue(forKey: sessionId)
     }
 
+    /// Send a message to the running Claude session
+    func sendToTerminal(_ sessionId: UUID, text: String) {
+        guard let terminal = terminals[sessionId] else { return }
+        terminal.send(txt: text)
+    }
+
+    /// Ask Claude to update the context file, then destroy the terminal after a delay
+    func saveContextAndDestroy(sessionId: UUID, delay: TimeInterval = 12.0) {
+        guard terminals[sessionId] != nil else { return }
+        let prompt = "Update your project context file with any new decisions, status changes, or lessons from this session. Be concise. Then run /exit.\r"
+        sendToTerminal(sessionId, text: prompt)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.destroyTerminal(for: sessionId)
+        }
+    }
+
     private func buildEnvironment() -> [String] {
         var env = ProcessInfo.processInfo.environment
         env["TERM"] = "xterm-256color"
         env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
+        // Prepend Notchy git wrapper to PATH so write operations are serialized across tabs
+        let notchyBin = NSHomeDirectory() + "/.notchy/bin"
+        if let path = env["PATH"] {
+            env["PATH"] = notchyBin + ":" + path
+        } else {
+            env["PATH"] = notchyBin + ":/usr/bin:/bin"
+        }
         return env.map { "\($0.key)=\($0.value)" }
+    }
+
+    /// Check if a directory has uncommitted git changes (staged or unstaged)
+    func hasUncommittedChanges(in directory: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", directory, "status", "--porcelain"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } catch {
+            return false
+        }
     }
 
     private func shellEscape(_ path: String) -> String {

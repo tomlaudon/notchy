@@ -10,6 +10,7 @@ struct TerminalSessionView: NSViewRepresentable {
     let workingDirectory: String
     var workspaceId: UUID? = nil
     var generation: Int = 0
+    var autoAccept: Bool = false
 
     class Coordinator {
         var currentSessionId: UUID?
@@ -37,7 +38,7 @@ struct TerminalSessionView: NSViewRepresentable {
     private func attachTerminal(to container: NSView, context: Context) {
         context.coordinator.currentSessionId = sessionId
         context.coordinator.currentGeneration = generation
-        let terminal = TerminalManager.shared.terminal(for: sessionId, workingDirectory: workingDirectory, workspaceId: workspaceId)
+        let terminal = TerminalManager.shared.terminal(for: sessionId, workingDirectory: workingDirectory, workspaceId: workspaceId, autoAccept: autoAccept)
 
         // Remove from previous superview if it was in a different container
         terminal.removeFromSuperview()

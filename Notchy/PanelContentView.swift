@@ -266,7 +266,8 @@ struct PanelContentView: View {
                             sessionId: session.id,
                             workingDirectory: session.workingDirectory,
                             workspaceId: session.workspaceId,
-                            generation: session.generation
+                            generation: session.generation,
+                            autoAccept: session.autoAcceptEnabled
                         )
                     } else {
                         placeholderView("Click + to create a new tab")
