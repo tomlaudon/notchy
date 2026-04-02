@@ -19,32 +19,61 @@ struct WorkspaceBar: View {
 
     /// Mini status dots for each session — visible when panel is collapsed
     private var sessionStatusDots: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             ForEach(sessionStore.visibleSessions) { session in
-                Group {
-                    switch session.terminalStatus {
-                    case .working:
-                        TabSpinnerView()
-                            .frame(width: 6, height: 6)
-                    case .waitingForInput:
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 6, height: 6)
-                    case .taskCompleted:
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 6, height: 6)
-                    case .idle, .interrupted:
-                        Circle()
-                            .fill(Color.gray.opacity(0.3))
-                            .frame(width: 6, height: 6)
+                HStack(spacing: 4) {
+                    // Status icon
+                    Group {
+                        switch session.terminalStatus {
+                        case .working:
+                            TabSpinnerView()
+                                .frame(width: 8, height: 8)
+                        case .waitingForInput:
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundColor(.red)
+                        case .taskCompleted:
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundColor(.green)
+                        case .idle, .interrupted:
+                            Circle()
+                                .fill(Color.gray.opacity(0.4))
+                                .frame(width: 7, height: 7)
+                        }
                     }
+                    // Tab name
+                    Text(session.projectName)
+                        .font(.system(size: 9, weight: session.id == sessionStore.activeSessionId ? .semibold : .regular))
+                        .lineLimit(1)
+                        .foregroundColor(statusColor(for: session.terminalStatus).opacity(
+                            session.id == sessionStore.activeSessionId ? 1.0 : 0.6
+                        ))
                 }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(statusColor(for: session.terminalStatus).opacity(
+                            session.id == sessionStore.activeSessionId ? 0.15 : 0.05
+                        ))
+                )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 3)
-                        .stroke(session.id == sessionStore.activeSessionId ? Color.white.opacity(0.5) : Color.clear, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(session.id == sessionStore.activeSessionId
+                            ? statusColor(for: session.terminalStatus).opacity(0.4)
+                            : Color.clear, lineWidth: 1)
                 )
             }
+        }
+    }
+
+    private func statusColor(for status: TerminalStatus) -> Color {
+        switch status {
+        case .working: return .yellow
+        case .waitingForInput: return .red
+        case .taskCompleted: return .green
+        case .idle, .interrupted: return .white
         }
     }
 

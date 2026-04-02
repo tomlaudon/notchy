@@ -56,11 +56,39 @@ struct SessionTab: View {
     /// Bottom accent bar color — always visible, shows status even on inactive tabs
     private var statusAccentColor: Color {
         switch terminalStatus {
-        case .working: return .yellow.opacity(0.8)
-        case .waitingForInput: return .red.opacity(0.9)
-        case .taskCompleted: return .green.opacity(0.7)
-        case .idle, .interrupted: return isActive ? .accentColor.opacity(0.3) : .clear
+        case .working: return .yellow
+        case .waitingForInput: return .red
+        case .taskCompleted: return .green
+        case .idle, .interrupted: return isActive ? .accentColor.opacity(0.4) : .gray.opacity(0.2)
         }
+    }
+
+    private var tabBackground: some View {
+        let fill: Color = if isActive {
+            statusBackgroundColor.opacity(0.25)
+        } else if isHovering {
+            Color.white.opacity(0.08)
+        } else {
+            statusBackgroundColor.opacity(0.06)
+        }
+        return RoundedRectangle(cornerRadius: 6).fill(fill)
+    }
+
+    private var tabBorder: some View {
+        let strokeColor = isActive ? statusBackgroundColor.opacity(0.5) : statusAccentColor.opacity(0.2)
+        let width: CGFloat = isActive ? 1.5 : 1
+        return RoundedRectangle(cornerRadius: 6).stroke(strokeColor, lineWidth: width)
+    }
+
+    private var tabAccentBar: some View {
+        RoundedRectangle(cornerRadius: 1.5)
+            .fill(statusAccentColor)
+            .frame(height: 3)
+            .padding(.horizontal, 2)
+    }
+
+    private func updateDialogState() {
+        SessionStore.shared.isShowingDialog = showRenameDialog || showRestoreConfirmation || showDirtyCloseWarning
     }
 
     private func attemptClose() {
@@ -88,19 +116,19 @@ struct SessionTab: View {
         switch terminalStatus {
         case .working:
             TabSpinnerView()
-                .frame(width: 8, height: 8)
+                .frame(width: 10, height: 10)
         case .waitingForInput:
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 8, weight: .bold))
-                .foregroundColor(.yellow)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(.red)
         case .taskCompleted:
-            Image(systemName: "checkmark")
-                .font(.system(size: 8, weight: .bold))
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 10, weight: .bold))
                 .foregroundColor(.green)
         case .idle, .interrupted:
             Circle()
                 .fill(Color.gray.opacity(0.4))
-                .frame(width: 6, height: 6)
+                .frame(width: 8, height: 8)
         }
     }
 
@@ -122,24 +150,10 @@ struct SessionTab: View {
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isActive
-                    ? statusBackgroundColor.opacity(0.15)
-                    : isHovering ? Color.white.opacity(0.05) : Color.clear)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(isActive ? statusBackgroundColor.opacity(0.4) : Color.clear, lineWidth: 1)
-        )
-        .overlay(alignment: .bottom) {
-            // Colored bottom accent bar shows status at a glance
-            RoundedRectangle(cornerRadius: 1)
-                .fill(statusAccentColor)
-                .frame(height: 2)
-                .padding(.horizontal, 4)
-        }
+        .padding(.vertical, 6)
+        .background(tabBackground)
+        .overlay(tabBorder)
+        .overlay(alignment: .bottom) { tabAccentBar }
         .onHover { hovering in
             isHovering = hovering
             if hovering {
@@ -214,15 +228,9 @@ struct SessionTab: View {
         } message: {
             Text("This tab has uncommitted changes that will be lost if you close it.")
         }
-        .onChange(of: showRenameDialog) {
-            SessionStore.shared.isShowingDialog = showRenameDialog || showRestoreConfirmation || showDirtyCloseWarning
-        }
-        .onChange(of: showRestoreConfirmation) {
-            SessionStore.shared.isShowingDialog = showRenameDialog || showRestoreConfirmation || showDirtyCloseWarning
-        }
-        .onChange(of: showDirtyCloseWarning) {
-            SessionStore.shared.isShowingDialog = showRenameDialog || showRestoreConfirmation || showDirtyCloseWarning
-        }
+        .onChange(of: showRenameDialog) { updateDialogState() }
+        .onChange(of: showRestoreConfirmation) { updateDialogState() }
+        .onChange(of: showDirtyCloseWarning) { updateDialogState() }
     }
 }
 
