@@ -27,7 +27,7 @@ class SessionStore {
     var isTerminalExpanded = true
     var isWindowFocused = true
     var isShowingDialog = false
-    var hasCompletedInitialDetection = false
+    var hasCompletedInitialDetection = true
 
     /// The most recent checkpoint for the active session, used to show the undo button
     var lastCheckpoint: Checkpoint?
@@ -78,6 +78,11 @@ class SessionStore {
     init() {
         restoreSessions()
         updatePollingTimer()
+        // If no sessions exist, clear workspace selection so user picks one
+        if sessions.isEmpty {
+            WorkspaceStore.shared.activeWorkspaceId = nil
+            WorkspaceStore.shared.persist()
+        }
     }
 
     // MARK: - Session Persistence
@@ -102,7 +107,7 @@ class SessionStore {
     }
 
     private func persistSessions() {
-        let persisted = sessions.map { PersistedSession(id: $0.id, projectName: $0.projectName, projectPath: $0.projectPath, workingDirectory: $0.workingDirectory) }
+        let persisted = sessions.map { PersistedSession(id: $0.id, projectName: $0.projectName, projectPath: $0.projectPath, workingDirectory: $0.workingDirectory, workspaceId: $0.workspaceId) }
         if let data = try? JSONEncoder().encode(persisted) {
             UserDefaults.standard.set(data, forKey: Self.sessionsKey)
         }
@@ -124,17 +129,12 @@ class SessionStore {
     private func updatePollingTimer() {
         pollingTimer?.invalidate()
         pollingTimer = nil
-
-        if isPinned {
-            pollingTimer = Timer.scheduledTimer(withTimeInterval: Self.pollingInterval, repeats: true) { [weak self] _ in
-                self?.detectAllXcodeProjectsAsync()
-            }
-        }
+        // Xcode polling disabled — workspaces are managed manually
     }
 
-    /// Called when the panel gains focus — trigger a fresh Xcode scan
+    /// Called when the panel gains focus
     func panelDidBecomeKey() {
-        detectAllXcodeProjectsAsync()
+        // Xcode detection disabled — workspaces are managed manually
     }
 
     /// Scans for all open Xcode projects — adds new ones, updates active set.
@@ -239,7 +239,12 @@ class SessionStore {
         }
     }
 
-    /// "+" button: creates a plain terminal session with no project association
+    /// All sessions are always visible — workspace just controls defaults for new tabs
+    var visibleSessions: [TerminalSession] {
+        return sessions
+    }
+
+    /// "+" button: creates a blank terminal tab (no workspace) at home dir
     func createQuickSession() {
         let session = TerminalSession(
             projectName: "Terminal",
@@ -248,6 +253,60 @@ class SessionStore {
         sessions.append(session)
         activeSessionId = session.id
         persistSessions()
+    }
+
+    /// Switch workspace — only applies to unstarted tabs. Started tabs are locked to their project.
+    func switchWorkspace(_ workspaceId: UUID) {
+        WorkspaceStore.shared.selectWorkspace(workspaceId)
+        guard let ws = WorkspaceStore.shared.workspaces.first(where: { $0.id == workspaceId }) else { return }
+
+        // If active tab is a blank Terminal (not yet working), assign it to this workspace
+        if let activeId = activeSessionId,
+           let index = sessions.firstIndex(where: { $0.id == activeId }),
+           sessions[index].workspaceId == nil {
+            TerminalManager.shared.destroyTerminal(for: activeId)
+            sessions[index].projectName = ws.name
+            sessions[index].workingDirectory = ws.repoPath
+            sessions[index].workspaceId = ws.id
+            sessions[index].generation += 1
+            sessions[index].hasStarted = true
+            persistSessions()
+            return
+        }
+
+        // If there's already a tab for this workspace, switch to it
+        if let existing = sessions.first(where: { $0.workspaceId == workspaceId }) {
+            activeSessionId = existing.id
+            startSessionIfNeeded(existing.id)
+            persistSessions()
+            return
+        }
+
+        // Otherwise create a new tab for this workspace
+        let session = TerminalSession(
+            projectName: ws.name,
+            workingDirectory: ws.repoPath,
+            started: true,
+            workspaceId: ws.id
+        )
+        sessions.append(session)
+        activeSessionId = session.id
+        persistSessions()
+    }
+
+    /// Check if a session's working directory is inside its workspace repo
+    func isSessionInWorkspace(_ session: TerminalSession) -> Bool {
+        guard let wsId = session.workspaceId,
+              let ws = WorkspaceStore.shared.workspaces.first(where: { $0.id == wsId }) else {
+            return true // no workspace = no constraint
+        }
+        let repoPath = ws.repoPath.hasSuffix("/") ? ws.repoPath : ws.repoPath + "/"
+        return session.workingDirectory.hasPrefix(repoPath) || session.workingDirectory == ws.repoPath
+    }
+
+    func toggleAutoAccept(_ id: UUID) {
+        guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
+        sessions[index].autoAcceptEnabled.toggle()
     }
 
     func renameSession(_ id: UUID, to newName: String) {
@@ -317,7 +376,7 @@ class SessionStore {
         if anyWorking && sleepActivity == nil {
             sleepActivity = ProcessInfo.processInfo.beginActivity(
                 options: [.idleSystemSleepDisabled, .suddenTerminationDisabled],
-                reason: "Claude is working"
+                reason: "Terminal process is running"
             )
         } else if !anyWorking, let activity = sleepActivity {
             ProcessInfo.processInfo.endActivity(activity)

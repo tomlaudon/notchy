@@ -32,9 +32,12 @@ struct WindowDragArea: NSViewRepresentable {
 
 struct PanelContentView: View {
     @Bindable var sessionStore: SessionStore
+    @Bindable var workspaceStore = WorkspaceStore.shared
     var onClose: () -> Void
     var onToggleExpand: (() -> Void)?
     @State private var showRestoreConfirmation = false
+    @State private var showSetupBanner = !UserDefaults.standard.bool(forKey: "hasCompletedSetup")
+    @State private var setupButtonClicked = false
 
     private var foregroundOpacity: Double {
         sessionStore.isWindowFocused ? 1.0 : 0.6
@@ -48,10 +51,63 @@ struct PanelContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Black top border — separate element so it pushes content down
+            // Color-coded top border — shows active workspace color
+            Rectangle()
+                .fill(workspaceStore.activeWorkspace?.color ?? Color.black)
+                .frame(height: workspaceStore.activeWorkspace != nil ? 3 : 0)
             Rectangle()
                 .fill(Color.black)
-                .frame(height: 10)
+                .frame(height: 7)
+
+            // Workspace bar
+            WorkspaceBar(
+                workspaceStore: workspaceStore,
+                sessionStore: sessionStore,
+                foregroundOpacity: foregroundOpacity
+            )
+
+
+            // One-time setup banner
+            if showSetupBanner {
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "shield.checkered")
+                            .font(.system(size: 16))
+                            .foregroundColor(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Grant Full Disk Access")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("Prevents repeated \"allow folder\" popups")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(setupButtonClicked ? "Opening..." : "Open Settings") {
+                            setupButtonClicked = true
+                            let process = Process()
+                            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                            process.arguments = ["x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"]
+                            try? process.run()
+                        }
+                        .disabled(setupButtonClicked)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        Button(action: {
+                            showSetupBanner = false
+                            UserDefaults.standard.set(true, forKey: "hasCompletedSetup")
+                        }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.white.opacity(0.4))
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.orange.opacity(0.1))
+                .foregroundColor(.white)
+            }
 
             // Top bar: tabs + controls
             HStack(spacing: 8) {
@@ -95,6 +151,25 @@ struct PanelContentView: View {
                         })
                             .frame(height: 200)
                     )
+
+                if let session = sessionStore.activeSession {
+                    Button(action: { sessionStore.toggleAutoAccept(session.id) }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: session.autoAcceptEnabled ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 10, weight: .medium))
+                            Text("Auto")
+                                .font(.system(size: 10, weight: .medium))
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(session.autoAcceptEnabled ? Color.orange.opacity(0.3) : Color.white.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(session.autoAcceptEnabled ? .orange : .white.opacity(foregroundOpacity))
+                    .help(session.autoAcceptEnabled ? "Auto-accept ON — Claude permissions auto-approved" : "Auto-accept OFF — click to auto-approve Claude permissions")
+                }
 
                 ZStack {
                     Button(action: { sessionStore.createQuickSession() }) {
@@ -190,37 +265,16 @@ struct PanelContentView: View {
                         TerminalSessionView(
                             sessionId: session.id,
                             workingDirectory: session.workingDirectory,
-                            launchClaude: session.projectPath != nil,
+                            workspaceId: session.workspaceId,
                             generation: session.generation
                         )
-                    } else if session.projectPath != nil && !sessionStore.activeXcodeProjects.contains(session.projectName) {
-                        // Xcode closed for this project
-                        placeholderView("Xcode project not open")
-                            .overlay {
-                                if let projectPath = session.projectPath {
-                                    Button("Open in Xcode") {
-                                        NSWorkspace.shared.open(URL(fileURLWithPath: projectPath))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(Color.white.opacity(0.15))
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                    .padding(.top, 28)
-                                }
-                            }
                     } else {
-                        placeholderView("Click a project tab to start a terminal session")
-                            .onTapGesture {
-                                sessionStore.startSessionIfNeeded(session.id)
-                            }
+                        placeholderView("Click + to create a new tab")
                     }
                 } else if sessionStore.sessions.isEmpty {
-                    placeholderView("No Xcode projects detected.\nClick + to create a new session.")
+                    placeholderView("Select a project from the dropdown\nor click + to create a new tab")
                 } else {
-                    placeholderView("Select a project to begin")
+                    placeholderView("Select a tab to begin")
                 }
             }
         }

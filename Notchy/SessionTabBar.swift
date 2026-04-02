@@ -5,7 +5,7 @@ struct SessionTabBar: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            ForEach(sessionStore.sessions) { session in
+            ForEach(sessionStore.visibleSessions) { session in
                 SessionTab(
                     session: session,
                     isActive: session.id == sessionStore.activeSessionId,

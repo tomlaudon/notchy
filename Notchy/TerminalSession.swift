@@ -26,8 +26,12 @@ struct TerminalSession: Identifiable {
     let createdAt: Date
     /// When the session most recently entered the .working state
     var workingStartedAt: Date?
+    /// Auto-accept Claude Code permission prompts
+    var autoAcceptEnabled: Bool
+    /// Workspace this session belongs to (nil = unscoped / legacy)
+    var workspaceId: UUID?
 
-    init(projectName: String, projectPath: String? = nil, workingDirectory: String? = nil, started: Bool = false) {
+    init(projectName: String, projectPath: String? = nil, workingDirectory: String? = nil, started: Bool = false, workspaceId: UUID? = nil) {
         self.id = UUID()
         self.projectName = projectName
         self.projectPath = projectPath
@@ -37,6 +41,8 @@ struct TerminalSession: Identifiable {
         self.generation = 0
         self.hasBeenSelected = started // if started immediately (e.g. "+" button), mark as selected
         self.createdAt = Date()
+        self.autoAcceptEnabled = workspaceId != nil  // Auto-accept on for workspace tabs
+        self.workspaceId = workspaceId
     }
 
     /// Restore a session from persisted data
@@ -50,6 +56,8 @@ struct TerminalSession: Identifiable {
         self.generation = 0
         self.hasBeenSelected = false
         self.createdAt = Date()
+        self.autoAcceptEnabled = false
+        self.workspaceId = persisted.workspaceId
     }
 }
 
@@ -59,4 +67,5 @@ struct PersistedSession: Codable {
     let projectName: String
     let projectPath: String?
     let workingDirectory: String
+    let workspaceId: UUID?
 }

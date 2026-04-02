@@ -560,7 +560,7 @@ enum NotchDisplayState: Equatable {
 
     /// Hierarchy: .taskCompleted (always shown) > .waitingForInput > .working > .idle
     static var current: NotchDisplayState {
-        guard SettingsManager.shared.claudeIntegrationEnabled else { return .idle }
+        // Status detection disabled for general-purpose terminal mode
         let sessions = SessionStore.shared.sessions
         if sessions.contains(where: { $0.terminalStatus == .taskCompleted }) {
             return .taskCompleted

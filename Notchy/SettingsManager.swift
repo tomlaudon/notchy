@@ -16,8 +16,18 @@ class SettingsManager {
         didSet { UserDefaults.standard.set(xcodeIntegrationEnabled, forKey: "xcodeIntegrationEnabled") }
     }
 
-    var claudeIntegrationEnabled: Bool {
-        didSet { UserDefaults.standard.set(claudeIntegrationEnabled, forKey: "claudeIntegrationEnabled") }
+    /// Default repo path for new projects
+    var defaultRepoPath: String {
+        didSet { UserDefaults.standard.set(defaultRepoPath, forKey: "defaultRepoPath") }
+    }
+
+    /// Addons paths for Odoo module detection
+    var addonsPaths: [String] {
+        didSet {
+            if let data = try? JSONEncoder().encode(addonsPaths) {
+                UserDefaults.standard.set(data, forKey: "addonsPaths")
+            }
+        }
     }
 
     init() {
@@ -25,11 +35,21 @@ class SettingsManager {
         if defaults.object(forKey: "replaceNotch") == nil { defaults.set(true, forKey: "replaceNotch") }
         if defaults.object(forKey: "soundsEnabled") == nil { defaults.set(true, forKey: "soundsEnabled") }
         if defaults.object(forKey: "xcodeIntegrationEnabled") == nil { defaults.set(true, forKey: "xcodeIntegrationEnabled") }
-        if defaults.object(forKey: "claudeIntegrationEnabled") == nil { defaults.set(true, forKey: "claudeIntegrationEnabled") }
 
         showNotch = defaults.bool(forKey: "replaceNotch")
         soundsEnabled = defaults.bool(forKey: "soundsEnabled")
         xcodeIntegrationEnabled = defaults.bool(forKey: "xcodeIntegrationEnabled")
-        claudeIntegrationEnabled = defaults.bool(forKey: "claudeIntegrationEnabled")
+
+        // Default repo path — falls back to ~/Projects
+        defaultRepoPath = defaults.string(forKey: "defaultRepoPath")
+            ?? NSHomeDirectory() + "/Projects"
+
+        // Addons paths — falls back to empty (user configures in settings)
+        if let data = defaults.data(forKey: "addonsPaths"),
+           let paths = try? JSONDecoder().decode([String].self, from: data) {
+            addonsPaths = paths
+        } else {
+            addonsPaths = []
+        }
     }
 }

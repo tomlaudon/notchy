@@ -131,62 +131,26 @@ class ClickThroughTerminalView: LocalProcessTerminalView {
     }
 
     private func evaluateStatus(for id: UUID) {
-        guard let visibleText = extractVisibleText() else { return }
-        let fullText = extractFullVisibleText() ?? visibleText
+        guard let session = SessionStore.shared.sessions.first(where: { $0.id == id }),
+              session.autoAcceptEnabled else { return }
+        checkAutoAccept(for: id)
+    }
 
-        let newStatus: TerminalStatus
+    /// Detects Claude Code permission prompts and auto-sends 'y' to accept them.
+    private func checkAutoAccept(for id: UUID) {
+        guard let fullText = extractFullVisibleText() else { return }
 
-        if Self.hasTokenCounterLine(visibleText) || fullText.contains("esc to interrupt") {
-            newStatus = .working
-        }
-        else if fullText.contains("Esc to cancel") || Self.hasUserPrompt(fullText) {
-            newStatus = .waitingForInput
-        } else if visibleText.contains("Interrupted") {
-            newStatus = .interrupted
-        } else {
-            newStatus = .idle
-        }
+        // Claude Code shows "Allow" / "allow" when waiting for tool permission,
+        // along with "Yes" option. Also detect "Do you want to proceed?" patterns.
+        // The key indicator is the presence of permission-prompt UI elements.
+        let isPermissionPrompt =
+            (fullText.contains("Allow") || fullText.contains("allow"))
+            && (fullText.contains("Yes") || fullText.contains("(y)") || fullText.contains("to allow"))
 
-        if !SessionStore.shared.sessions.contains(where: {$0.id == id && $0.terminalStatus == newStatus}) {
-            DispatchQueue.main.async {
-                SessionStore.shared.updateTerminalStatus(id, status: newStatus)
+        if isPermissionPrompt {
+            DispatchQueue.main.async { [weak self] in
+                self?.send(txt: "y")
             }
-        }
-    }
-
-    /// Checks whether the text contains a Claude spinner character (visible during working state)
-    private static let spinnerCharacters: Set<Character> = ["·", "✢", "✳", "✶", "✻", "✽"]
-
-    /// Checks for a line like "Idle for 30s" — must contain " for " and end with "s",
-    /// but must NOT contain parentheses (which indicate thinking duration, not true idle).
-    private static func hasIdleForLine(_ text: String) -> Bool {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        return lines.contains { line in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.contains(" for ") else { return false }
-            guard trimmed.hasSuffix("s") else { return false }
-            guard !trimmed.contains("(") && !trimmed.contains(")") else { return false }
-            return true
-        }
-    }
-
-    /// Checks for the user prompt indicator: ❯ followed by a digit (1-9)
-    private static func hasUserPrompt(_ text: String) -> Bool {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        return lines.contains { line in
-            let trimmed = line.drop(while: { $0 == " " })
-            return trimmed.hasPrefix("❯") &&
-                trimmed.dropFirst().first == " " &&
-                trimmed.dropFirst(2).first?.isNumber == true
-        }
-    }
-
-    private static func hasTokenCounterLine(_ text: String) -> Bool {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        return lines.contains { line in
-            guard let first = line.first, spinnerCharacters.contains(first) else { return false }
-            guard line.dropFirst().first == " " else { return false }
-            return line.contains("…")
         }
     }
 }
@@ -196,7 +160,7 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
 
     private var terminals: [UUID: LocalProcessTerminalView] = [:]
 
-    func terminal(for sessionId: UUID, workingDirectory: String, launchClaude: Bool = true) -> LocalProcessTerminalView {
+    func terminal(for sessionId: UUID, workingDirectory: String, workspaceId: UUID? = nil) -> LocalProcessTerminalView {
         if let existing = terminals[sessionId] {
             return existing
         }
@@ -220,13 +184,24 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
             execName: "-" + (shell as NSString).lastPathComponent
         )
 
-        // cd to working directory, launch claude only if CLAUDE.md exists and integration is enabled
         let escapedDir = shellEscape(workingDirectory)
-        let hasClaude = launchClaude && SettingsManager.shared.claudeIntegrationEnabled && FileManager.default.fileExists(atPath: (workingDirectory as NSString).appendingPathComponent("CLAUDE.md"))
-        if hasClaude {
-            terminal.send(txt: "cd \(escapedDir) && clear && claude\r")
-        } else {
-            terminal.send(txt: "cd \(escapedDir) && clear\r")
+        terminal.send(txt: "cd \(escapedDir) && clear && claude\r")
+
+        // Auto-accept the trust prompt after claude starts
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            terminal.send(txt: "\r")
+        }
+
+        // Load project context file into Claude as the first prompt
+        if let wsId = workspaceId,
+           let ws = WorkspaceStore.shared.workspaces.first(where: { $0.id == wsId }) {
+            ws.ensureContextFile()
+            let contextPath = ws.contextFilePath
+            // Wait for claude to fully start (trust prompt + loading), then send context
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) {
+                let prompt = "Read \(contextPath) for project context. This is your primary reference for this project — keep it updated with decisions, architecture changes, and status as we work. You have full access to all files, databases, and other project context files on this machine.\r"
+                terminal.send(txt: prompt)
+            }
         }
 
         terminals[sessionId] = terminal

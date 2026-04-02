@@ -8,7 +8,7 @@ private class ClickThroughContainerView: NSView {
 struct TerminalSessionView: NSViewRepresentable {
     let sessionId: UUID
     let workingDirectory: String
-    var launchClaude: Bool = true
+    var workspaceId: UUID? = nil
     var generation: Int = 0
 
     class Coordinator {
@@ -37,7 +37,7 @@ struct TerminalSessionView: NSViewRepresentable {
     private func attachTerminal(to container: NSView, context: Context) {
         context.coordinator.currentSessionId = sessionId
         context.coordinator.currentGeneration = generation
-        let terminal = TerminalManager.shared.terminal(for: sessionId, workingDirectory: workingDirectory, launchClaude: launchClaude)
+        let terminal = TerminalManager.shared.terminal(for: sessionId, workingDirectory: workingDirectory, workspaceId: workspaceId)
 
         // Remove from previous superview if it was in a different container
         terminal.removeFromSuperview()

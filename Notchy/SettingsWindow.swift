@@ -4,12 +4,12 @@ import AppKit
 enum SettingsTab: String, CaseIterable {
     case about = "About"
     case general = "General"
-    case integrations = "Integrations"
+    case paths = "Paths"
 
     var icon: String {
         switch self {
         case .general: return "gearshape"
-        case .integrations: return "puzzlepiece"
+        case .paths: return "folder"
         case .about: return "info.circle"
         }
     }
@@ -29,11 +29,11 @@ struct SettingsContentView: View {
                 .tabItem { Label(SettingsTab.general.rawValue, systemImage: SettingsTab.general.icon) }
                 .tag(SettingsTab.general)
 
-            IntegrationsTab()
-                .tabItem { Label(SettingsTab.integrations.rawValue, systemImage: SettingsTab.integrations.icon) }
-                .tag(SettingsTab.integrations)
+            PathsTab()
+                .tabItem { Label(SettingsTab.paths.rawValue, systemImage: SettingsTab.paths.icon) }
+                .tag(SettingsTab.paths)
         }
-        .frame(width: 450, height: 240)
+        .frame(width: 500, height: 320)
     }
 }
 
@@ -54,22 +54,71 @@ struct GeneralTab: View {
     }
 }
 
-struct IntegrationsTab: View {
+struct PathsTab: View {
     @Bindable private var settings = SettingsManager.shared
+    @State private var newPath = ""
 
     var body: some View {
-        Form {
-            Toggle(isOn: $settings.xcodeIntegrationEnabled) {
-                Text("Xcode")
-                Text("Detect Xcode projects automatically")
-                    .font(.caption)
+        VStack(alignment: .leading, spacing: 12) {
+            // Default repo path
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Default Repo Path")
+                    .font(.caption.bold())
+                Text("Where \"New Project\" creates branches and modules")
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
+                HStack {
+                    TextField("Path", text: $settings.defaultRepoPath)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Browse") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseFiles = false
+                        panel.canChooseDirectories = true
+                        if panel.runModal() == .OK, let url = panel.url {
+                            settings.defaultRepoPath = url.path
+                        }
+                    }
+                }
             }
-            Toggle(isOn: $settings.claudeIntegrationEnabled) {
-                Text("Claude")
-                Text("Shows real-time status updates")
-                    .font(.caption)
+
+            Divider()
+
+            // Addons paths
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Addons Paths")
+                    .font(.caption.bold())
+                Text("Directories scanned for Odoo modules")
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
+
+                ForEach(settings.addonsPaths, id: \.self) { path in
+                    HStack {
+                        Text(path)
+                            .font(.system(size: 11, design: .monospaced))
+                            .lineLimit(1)
+                        Spacer()
+                        Button(action: {
+                            settings.addonsPaths.removeAll { $0 == path }
+                        }) {
+                            Image(systemName: "minus.circle")
+                                .foregroundColor(.red)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                HStack {
+                    Button("Add Path...") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseFiles = false
+                        panel.canChooseDirectories = true
+                        if panel.runModal() == .OK, let url = panel.url {
+                            if !settings.addonsPaths.contains(url.path) {
+                                settings.addonsPaths.append(url.path)
+                            }
+                        }
+                    }
+                }
             }
         }
         .padding(20)
@@ -118,7 +167,7 @@ class SettingsWindowController {
         let hostingView = NSHostingView(rootView: content)
 
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 450, height: 240),
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 320),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
