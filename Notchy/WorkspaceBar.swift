@@ -78,65 +78,71 @@ struct WorkspaceBar: View {
     }
 
     var body: some View {
-        Menu {
-            // Existing workspaces — just click to switch
-            ForEach(workspaceStore.workspaces) { ws in
-                Button(action: { sessionStore.switchWorkspace(ws.id) }) {
-                    HStack {
-                        if ws.id == workspaceStore.activeWorkspaceId {
-                            Image(systemName: "checkmark")
+        VStack(spacing: 0) {
+            // Workspace selector row
+            Menu {
+                // Existing workspaces — just click to switch
+                ForEach(workspaceStore.workspaces) { ws in
+                    Button(action: { sessionStore.switchWorkspace(ws.id) }) {
+                        HStack {
+                            if ws.id == workspaceStore.activeWorkspaceId {
+                                Image(systemName: "checkmark")
+                            }
+                            Text(ws.name)
                         }
-                        Text(ws.name)
                     }
                 }
-            }
 
-            if !workspaceStore.workspaces.isEmpty {
-                Divider()
-            }
-
-            Button(action: { showAddSheet = true }) {
-                Label("New Project...", systemImage: "plus.circle.fill")
-            }
-
-            if let ws = workspaceStore.activeWorkspace {
-                Divider()
-                Button("Edit \"\(ws.name)\"...") {
-                    editingWorkspace = ws
-                    showEditSheet = true
-                }
-                Button("Remove \"\(ws.name)\"", role: .destructive) {
-                    WorkspaceStore.shared.removeWorkspace(ws.id)
-                }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(activeColor)
-                        .frame(width: 7, height: 7)
-                    Text(activeLabel)
-                        .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .bold))
+                if !workspaceStore.workspaces.isEmpty {
+                    Divider()
                 }
 
-                sessionStatusDots
+                Button(action: { showAddSheet = true }) {
+                    Label("New Project...", systemImage: "plus.circle.fill")
+                }
 
-                Spacer()
-
-                // Port + branch badge for active workspace
                 if let ws = workspaceStore.activeWorkspace {
-                    WorkspaceInfoBadge(workspace: ws)
+                    Divider()
+                    Button("Edit \"\(ws.name)\"...") {
+                        editingWorkspace = ws
+                        showEditSheet = true
+                    }
+                    Button("Remove \"\(ws.name)\"", role: .destructive) {
+                        WorkspaceStore.shared.removeWorkspace(ws.id)
+                    }
                 }
+            } label: {
+                HStack(spacing: 6) {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(activeColor)
+                            .frame(width: 7, height: 7)
+                        Text(activeLabel)
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                    }
+
+                    Spacer()
+
+                    // Port + branch badge for active workspace
+                    if let ws = workspaceStore.activeWorkspace {
+                        WorkspaceInfoBadge(workspace: ws)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
+            .menuStyle(.borderlessButton)
+            .foregroundColor(activeColor)
+
+            // Session status strip — always visible, outside the Menu
+            sessionStatusDots
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
         }
-        .menuStyle(.borderlessButton)
-        .foregroundColor(activeColor)
         .background(workspaceAccentBackground)
         .sheet(isPresented: $showAddSheet) {
             WorkspaceEditorSheet(mode: .add)
