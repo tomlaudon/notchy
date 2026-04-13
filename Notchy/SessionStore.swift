@@ -76,13 +76,10 @@ class SessionStore {
     private static let activeSessionKey = "activeSessionId"
 
     init() {
-        restoreSessions()
         updatePollingTimer()
-        // If no sessions exist, clear workspace selection so user picks one
-        if sessions.isEmpty {
-            WorkspaceStore.shared.activeWorkspaceId = nil
-            WorkspaceStore.shared.persist()
-        }
+        // Start fresh with no sessions — user picks a workspace to begin
+        WorkspaceStore.shared.activeWorkspaceId = nil
+        WorkspaceStore.shared.persist()
     }
 
     // MARK: - Session Persistence
@@ -99,10 +96,10 @@ class SessionStore {
         } else {
             activeSessionId = sessions.first?.id
         }
-        // Mark all restored sessions as started so terminals launch immediately
+        // Restore tabs but don't auto-start terminals — user clicks to start
         for i in sessions.indices {
-            sessions[i].hasStarted = true
-            sessions[i].hasBeenSelected = true
+            sessions[i].hasStarted = false
+            sessions[i].hasBeenSelected = false
         }
     }
 
@@ -218,14 +215,16 @@ class SessionStore {
         if let index = sessions.firstIndex(where: { $0.id == id }) {
             sessions[index].hasBeenSelected = true
             let session = sessions[index]
-            // Auto-start if it's a plain terminal (no project) or the project is open in Xcode
-            if session.projectPath == nil || activeXcodeProjects.contains(session.projectName) {
-                startSessionIfNeeded(id)
-            }
+            // Start the terminal when the user selects a tab
+            startSessionIfNeeded(id)
             // Expand terminal if collapsed when user taps a tab
             if !isTerminalExpanded {
                 isTerminalExpanded = true
                 NotificationCenter.default.post(name: .NotchyExpandPanel, object: nil)
+            }
+            // Sync workspace dropdown to match the selected tab
+            if let wsId = session.workspaceId {
+                WorkspaceStore.shared.selectWorkspace(wsId)
             }
         }
         persistSessions()
@@ -266,7 +265,7 @@ class SessionStore {
            sessions[index].workspaceId == nil {
             TerminalManager.shared.destroyTerminal(for: activeId)
             sessions[index].projectName = ws.name
-            sessions[index].workingDirectory = ws.repoPath
+            sessions[index].workingDirectory = ws.effectivePath
             sessions[index].workspaceId = ws.id
             sessions[index].generation += 1
             sessions[index].hasStarted = true
@@ -285,7 +284,7 @@ class SessionStore {
         // Otherwise create a new tab for this workspace
         let session = TerminalSession(
             projectName: ws.name,
-            workingDirectory: ws.repoPath,
+            workingDirectory: ws.effectivePath,
             started: true,
             workspaceId: ws.id
         )
@@ -294,12 +293,18 @@ class SessionStore {
         persistSessions()
     }
 
-    /// Check if a session's working directory is inside its workspace repo
+    /// Check if a session's working directory is inside its workspace repo (or worktree)
     func isSessionInWorkspace(_ session: TerminalSession) -> Bool {
         guard let wsId = session.workspaceId,
               let ws = WorkspaceStore.shared.workspaces.first(where: { $0.id == wsId }) else {
             return true // no workspace = no constraint
         }
+        let effective = ws.effectivePath
+        let effectiveSuffix = effective.hasSuffix("/") ? effective : effective + "/"
+        if session.workingDirectory.hasPrefix(effectiveSuffix) || session.workingDirectory == effective {
+            return true
+        }
+        // Also accept the original repoPath for backwards compatibility
         let repoPath = ws.repoPath.hasSuffix("/") ? ws.repoPath : ws.repoPath + "/"
         return session.workingDirectory.hasPrefix(repoPath) || session.workingDirectory == ws.repoPath
     }

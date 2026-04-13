@@ -147,8 +147,11 @@ class NotchWindow: NSPanel {
     }
 
     private func updateExpansionState() {
-        // Always expand when there are sessions so tab status is visible
-        let shouldExpand = !SessionStore.shared.sessions.isEmpty
+        // Only expand when there's something noteworthy to show
+        let sessions = SessionStore.shared.sessions
+        let shouldExpand = sessions.contains { s in
+            s.terminalStatus == .working || s.terminalStatus == .waitingForInput || s.terminalStatus == .taskCompleted
+        }
 
         if shouldExpand && !isExpanded {
             collapseDebounceTimer?.invalidate()
@@ -178,8 +181,11 @@ class NotchWindow: NSPanel {
         guard let screen = NSScreen.builtIn else { return }
         let screenFrame = screen.frame
 
-        // Scale width based on number of tabs
-        let tabCount = CGFloat(max(SessionStore.shared.sessions.count, 1))
+        // Scale width based on number of noteworthy sessions
+        let noteworthy = SessionStore.shared.sessions.filter { s in
+            s.terminalStatus == .working || s.terminalStatus == .waitingForInput || s.terminalStatus == .taskCompleted
+        }
+        let tabCount = CGFloat(max(noteworthy.count, 1))
         let targetWidth: CGFloat = notchWidth + 60 + (tabCount * 80)
         var targetFrame = NSRect(
             x: screenFrame.midX - targetWidth / 2,
@@ -585,47 +591,68 @@ struct NotchPillContent: View {
     private var displayState: NotchDisplayState { .current }
     private var sessions: [TerminalSession] { SessionStore.shared.sessions }
 
+    /// Only show sessions that have a noteworthy status (not idle)
+    private var noteworthySessions: [TerminalSession] {
+        sessions.filter { $0.terminalStatus != .idle && $0.terminalStatus != .interrupted }
+    }
+
+    /// True if any session is currently waiting for permission/input
+    private var anyWaiting: Bool {
+        sessions.contains { $0.terminalStatus == .waitingForInput }
+    }
+
     var body: some View {
         HStack(spacing: 6) {
-            ForEach(sessions) { session in
-                HStack(spacing: 3) {
-                    // Status icon per tab
-                    Group {
-                        switch session.terminalStatus {
-                        case .working:
-                            SpinnerView()
-                                .frame(width: 8, height: 8)
-                        case .waitingForInput:
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(.red)
-                        case .taskCompleted:
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(.green)
-                        case .idle, .interrupted:
-                            Circle()
-                                .fill(Color.gray.opacity(0.5))
-                                .frame(width: 6, height: 6)
-                        }
-                    }
-                    // Tab name
-                    Text(session.projectName)
-                        .font(.system(size: 9, weight: session.id == SessionStore.shared.activeSessionId ? .bold : .medium))
-                        .lineLimit(1)
-                        .foregroundColor(notchStatusColor(for: session.terminalStatus))
+            if noteworthySessions.isEmpty {
+                // Nothing noteworthy — just show a subtle dot per tab.
+                // If any session is waiting for permissions, light the dots red and pulse them.
+                ForEach(sessions) { session in
+                    let waiting = session.terminalStatus == .waitingForInput
+                    Circle()
+                        .fill(waiting ? Color.red : Color.gray.opacity(0.4))
+                        .frame(width: waiting ? 6 : 5, height: waiting ? 6 : 5)
+                        .modifier(PulseModifier(active: waiting))
                 }
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(notchStatusColor(for: session.terminalStatus).opacity(0.15))
-                )
+            } else {
+                ForEach(noteworthySessions) { session in
+                    HStack(spacing: 3) {
+                        // Status icon
+                        Group {
+                            switch session.terminalStatus {
+                            case .working:
+                                SpinnerView()
+                                    .frame(width: 8, height: 8)
+                            case .waitingForInput:
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.red)
+                                    .modifier(PulseModifier(active: true))
+                            case .taskCompleted:
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.green)
+                            case .idle, .interrupted:
+                                EmptyView()
+                            }
+                        }
+                        // Short name — only when there's something to report
+                        Text(session.projectName)
+                            .font(.system(size: 9, weight: .medium))
+                            .lineLimit(1)
+                            .foregroundColor(notchStatusColor(for: session.terminalStatus))
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(notchStatusColor(for: session.terminalStatus).opacity(session.terminalStatus == .waitingForInput ? 0.3 : 0.15))
+                    )
 
-                if session.id != sessions.last?.id {
-                    Rectangle()
-                        .fill(Color.white.opacity(0.15))
-                        .frame(width: 1, height: 12)
+                    if session.id != noteworthySessions.last?.id {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.15))
+                            .frame(width: 1, height: 12)
+                    }
                 }
             }
         }
@@ -658,6 +685,21 @@ struct SpinnerView: View {
             .rotationEffect(.degrees(isAnimating ? 360 : 0))
             .animation(.linear(duration: 0.8).repeatForever(autoreverses: false), value: isAnimating)
             .onAppear { isAnimating = true }
+    }
+}
+
+/// Applies an attention-grabbing opacity + scale pulse when `active` is true.
+struct PulseModifier: ViewModifier {
+    let active: Bool
+    @State private var phase = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(active ? (phase ? 1.0 : 0.45) : 1.0)
+            .scaleEffect(active ? (phase ? 1.2 : 0.9) : 1.0)
+            .animation(active ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true) : .default, value: phase)
+            .onAppear { if active { phase = true } }
+            .onChange(of: active) { _, now in phase = now }
     }
 }
 

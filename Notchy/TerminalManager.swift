@@ -131,18 +131,36 @@ class ClickThroughTerminalView: LocalProcessTerminalView {
     }
 
     private func evaluateStatus(for id: UUID) {
-        guard let session = SessionStore.shared.sessions.first(where: { $0.id == id }),
-              session.autoAcceptEnabled else { return }
-        checkAutoAccept(for: id)
+        guard let session = SessionStore.shared.sessions.first(where: { $0.id == id }) else { return }
+
+        let isWaiting = isAtPermissionPrompt()
+
+        DispatchQueue.main.async {
+            guard let current = SessionStore.shared.sessions.first(where: { $0.id == id }) else { return }
+            if isWaiting {
+                if current.terminalStatus != .waitingForInput {
+                    SessionStore.shared.updateTerminalStatus(id, status: .waitingForInput)
+                }
+            } else if current.terminalStatus == .waitingForInput {
+                // Prompt cleared — return to idle
+                SessionStore.shared.updateTerminalStatus(id, status: .idle)
+            }
+        }
+
+        if isWaiting && session.autoAcceptEnabled {
+            DispatchQueue.main.async { [weak self] in
+                self?.send(txt: "y")
+            }
+        }
     }
 
-    /// Detects Claude Code permission/confirmation prompts and auto-accepts them.
+    /// Detects Claude Code permission/confirmation prompts.
     /// Catches: tool permission prompts, bash command confirmations,
     /// --dangerously-skip-permissions confirmation, and trust prompts.
-    private func checkAutoAccept(for id: UUID) {
-        guard let fullText = extractFullVisibleText() else { return }
+    private func isAtPermissionPrompt() -> Bool {
+        guard let fullText = extractFullVisibleText() else { return false }
 
-        let shouldAccept =
+        return
             // Standard permission prompt: "Allow" + accept option
             ((fullText.contains("Allow") || fullText.contains("allow"))
                 && (fullText.contains("Yes") || fullText.contains("(y)") || fullText.contains("to allow")))
@@ -153,12 +171,6 @@ class ClickThroughTerminalView: LocalProcessTerminalView {
             // Trust/workspace prompt
             || fullText.contains("Do you trust")
             || fullText.contains("Trust this project")
-
-        if shouldAccept {
-            DispatchQueue.main.async { [weak self] in
-                self?.send(txt: "y")
-            }
-        }
     }
 }
 
@@ -170,6 +182,17 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
     func terminal(for sessionId: UUID, workingDirectory: String, workspaceId: UUID? = nil, autoAccept: Bool = false) -> LocalProcessTerminalView {
         if let existing = terminals[sessionId] {
             return existing
+        }
+
+        // Resolve the effective working directory — use worktree if workspace has one
+        var effectiveDir = workingDirectory
+        if let wsId = workspaceId,
+           let ws = WorkspaceStore.shared.workspaces.first(where: { $0.id == wsId }),
+           let wtPath = ws.worktreePath {
+            // Ensure worktree exists (synchronous — fast if already created)
+            if let created = ws.ensureWorktree() {
+                effectiveDir = created
+            }
         }
 
         let terminal = ClickThroughTerminalView(frame: NSRect(x: 0, y: 0, width: 720, height: 460))
@@ -191,7 +214,7 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
             execName: "-" + (shell as NSString).lastPathComponent
         )
 
-        let escapedDir = shellEscape(workingDirectory)
+        let escapedDir = shellEscape(effectiveDir)
         let claudeCmd = autoAccept ? "claude --dangerously-skip-permissions" : "claude"
         terminal.send(txt: "cd \(escapedDir) && clear && \(claudeCmd)\r")
 
@@ -280,11 +303,12 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
         return env.map { "\($0.key)=\($0.value)" }
     }
 
-    /// Check if a directory has uncommitted git changes (staged or unstaged)
+    /// Check if a directory has uncommitted git changes (staged or unstaged, tracked files only).
+    /// Untracked files are ignored — stray build artifacts / .DS_Store shouldn't trigger the close warning.
     func hasUncommittedChanges(in directory: String) -> Bool {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["-C", directory, "status", "--porcelain"]
+        process.arguments = ["-C", directory, "status", "--porcelain", "--untracked-files=no"]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice

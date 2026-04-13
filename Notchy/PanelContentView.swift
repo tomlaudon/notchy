@@ -49,11 +49,19 @@ struct PanelContentView: View {
         (!sessionStore.isWindowFocused && sessionStore.isTerminalExpanded) ? 0.5 : 1.0
     }
 
+    /// The active tab's workspace color — used for top border and header tint
+    private var activeTabColor: Color {
+        if let session = sessionStore.activeSession {
+            return SessionTabBar.workspaceColor(for: session)
+        }
+        return workspaceStore.activeWorkspace?.color ?? .blue
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            // Color-coded top border — shows active workspace color
+            // Color-coded top border — matches active tab's workspace color
             Rectangle()
-                .fill(workspaceStore.activeWorkspace?.color ?? Color.black)
+                .fill(activeTabColor)
                 .frame(height: workspaceStore.activeWorkspace != nil ? 3 : 0)
             Rectangle()
                 .fill(Color.black)
@@ -186,7 +194,13 @@ struct PanelContentView: View {
                 .padding(.trailing, -10)
             }
             .padding(.horizontal, 12)
-            .background(Color(nsColor: NSColor(white: 0.14, alpha: 1.0)).opacity(chromeBackgroundOpacity))
+            .background(
+                ZStack {
+                    Color(nsColor: NSColor(white: 0.14, alpha: 1.0))
+                    activeTabColor.opacity(0.06)
+                }
+                .opacity(chromeBackgroundOpacity)
+            )
 
             if sessionStore.isTerminalExpanded, sessionStore.checkpointStatus != nil || sessionStore.lastCheckpoint != nil {
                 HStack(spacing: 6) {
@@ -269,6 +283,7 @@ struct PanelContentView: View {
                             generation: session.generation,
                             autoAccept: session.autoAcceptEnabled
                         )
+                        .id(session.id)
                     } else {
                         placeholderView("Click + to create a new tab")
                     }

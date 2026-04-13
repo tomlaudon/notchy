@@ -12,6 +12,7 @@ struct SessionTabBar: View {
                     terminalActive: session.hasStarted && sessionStore.activeXcodeProjects.contains(session.projectName),
                     terminalStatus: session.terminalStatus,
                     foregroundOpacity: sessionStore.isWindowFocused ? 1.0 : 0.6,
+                    workspaceColor: Self.workspaceColor(for: session),
                     onSelect: { sessionStore.selectSession(session.id) },
                     onClose: { sessionStore.closeSession(session.id) },
                     onRename: { newName in
@@ -22,6 +23,15 @@ struct SessionTabBar: View {
         }
         .fixedSize(horizontal: true, vertical: false)
     }
+
+    /// Look up the workspace color for a session, falling back to blue
+    static func workspaceColor(for session: TerminalSession) -> Color {
+        guard let wsId = session.workspaceId,
+              let ws = WorkspaceStore.shared.workspaces.first(where: { $0.id == wsId }) else {
+            return .blue
+        }
+        return ws.color
+    }
 }
 
 struct SessionTab: View {
@@ -30,6 +40,7 @@ struct SessionTab: View {
     let terminalActive: Bool
     var terminalStatus: TerminalStatus = .idle
     var foregroundOpacity: Double = 1.0
+    var workspaceColor: Color = .blue
     let onSelect: () -> Void
     let onClose: () -> Void
     let onRename: (String) -> Void
@@ -43,39 +54,39 @@ struct SessionTab: View {
 
     private var name: String { session.projectName }
 
-    /// Background tint for active tab based on status
-    private var statusBackgroundColor: Color {
+    /// The tab's primary color — workspace color when idle, status color when noteworthy
+    private var tabColor: Color {
         switch terminalStatus {
         case .working: return .yellow
         case .waitingForInput: return .red
         case .taskCompleted: return .green
-        case .idle, .interrupted: return .accentColor
+        case .idle, .interrupted: return workspaceColor
         }
     }
 
-    /// Bottom accent bar color — always visible, shows status even on inactive tabs
+    /// Bottom accent bar color — always visible
     private var statusAccentColor: Color {
         switch terminalStatus {
         case .working: return .yellow
         case .waitingForInput: return .red
         case .taskCompleted: return .green
-        case .idle, .interrupted: return isActive ? .accentColor.opacity(0.4) : .gray.opacity(0.2)
+        case .idle, .interrupted: return isActive ? workspaceColor.opacity(0.6) : workspaceColor.opacity(0.25)
         }
     }
 
     private var tabBackground: some View {
         let fill: Color = if isActive {
-            statusBackgroundColor.opacity(0.25)
+            tabColor.opacity(0.25)
         } else if isHovering {
             Color.white.opacity(0.08)
         } else {
-            statusBackgroundColor.opacity(0.06)
+            tabColor.opacity(0.06)
         }
         return RoundedRectangle(cornerRadius: 6).fill(fill)
     }
 
     private var tabBorder: some View {
-        let strokeColor = isActive ? statusBackgroundColor.opacity(0.5) : statusAccentColor.opacity(0.2)
+        let strokeColor = isActive ? tabColor.opacity(0.5) : statusAccentColor.opacity(0.2)
         let width: CGFloat = isActive ? 1.5 : 1
         return RoundedRectangle(cornerRadius: 6).stroke(strokeColor, lineWidth: width)
     }
@@ -127,7 +138,7 @@ struct SessionTab: View {
                 .foregroundColor(.green)
         case .idle, .interrupted:
             Circle()
-                .fill(Color.gray.opacity(0.4))
+                .fill(workspaceColor.opacity(isActive ? 0.7 : 0.4))
                 .frame(width: 8, height: 8)
         }
     }

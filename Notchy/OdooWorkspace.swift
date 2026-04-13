@@ -46,9 +46,28 @@ struct OdooWorkspace: Identifiable, Codable, Equatable {
     /// Optional git branch to expect for this workspace (safety check)
     var expectedBranch: String?
 
+    /// Slug used for worktree directory and context file names
+    private var nameSlug: String {
+        name.lowercased().replacingOccurrences(of: " ", with: "_")
+    }
+
+    /// Path to the git worktree for this workspace (if it has an expectedBranch)
+    var worktreePath: String? {
+        guard let branch = expectedBranch, !branch.isEmpty else { return nil }
+        return NSHomeDirectory() + "/.notchy/worktrees/\(nameSlug)"
+    }
+
+    /// The effective working directory — worktree if available, otherwise repoPath
+    var effectivePath: String {
+        if let wt = worktreePath, FileManager.default.fileExists(atPath: wt + "/.git") {
+            return wt
+        }
+        return repoPath
+    }
+
     /// Path to project context file that Claude reads on startup
     var contextFilePath: String {
-        return (repoPath as NSString).appendingPathComponent(".notchy/\(name.lowercased().replacingOccurrences(of: " ", with: "_")).md")
+        return (effectivePath as NSString).appendingPathComponent(".notchy/\(nameSlug).md")
     }
 
     /// Ensure the context file exists, creating it with a template if needed
@@ -101,11 +120,55 @@ struct OdooWorkspace: Identifiable, Codable, Equatable {
         }
     }
 
-    /// Read the current git branch for this workspace's repo
-    func currentGitBranch() -> String? {
+    /// Create a git worktree for this workspace if it has an expectedBranch and the worktree doesn't exist yet.
+    /// Must be called from a background thread (runs git commands synchronously).
+    /// Returns the worktree path on success, nil if not applicable or failed.
+    @discardableResult
+    func ensureWorktree() -> String? {
+        guard let wtPath = worktreePath, let branch = expectedBranch, !branch.isEmpty else { return nil }
+        let fm = FileManager.default
+
+        // Already exists — just make sure we're on the right branch
+        if fm.fileExists(atPath: wtPath + "/.git") {
+            return wtPath
+        }
+
+        // Create parent directory
+        let parentDir = (wtPath as NSString).deletingLastPathComponent
+        if !fm.fileExists(atPath: parentDir) {
+            try? fm.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
+        }
+
+        // Create worktree checked out to the expected branch
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["-C", repoPath, "branch", "--show-current"]
+        process.arguments = ["-C", repoPath, "worktree", "add", wtPath, branch]
+        let errPipe = Pipe()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = errPipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+            if process.terminationStatus == 0 {
+                return wtPath
+            }
+            // Log error for debugging
+            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            let errMsg = String(data: errData, encoding: .utf8) ?? ""
+            NSLog("Notchy: git worktree add failed: \(errMsg)")
+            return nil
+        } catch {
+            NSLog("Notchy: git worktree add exception: \(error)")
+            return nil
+        }
+    }
+
+    /// Read the current git branch for this workspace (checks worktree if available)
+    func currentGitBranch() -> String? {
+        let dir = effectivePath
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", dir, "branch", "--show-current"]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice

@@ -7,6 +7,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let sessionStore = SessionStore.shared
     private let settings = SettingsManager.shared
     private var hoverHideTimer: Timer?
+    private var hoverWatchdogTimer: Timer?
     private var hoverGlobalMonitor: Any?
     private var hoverLocalMonitor: Any?
     private var hotkeyMonitor: Any?
@@ -50,19 +51,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.panelOpenedViaHover = false
             self.stopHoverTracking()
         }
-        // When panel becomes key (user clicked on it), stop hover tracking
-        // since resign-key will handle hiding from here
+        // When panel becomes key (user clicked on it), keep hover tracking
+        // if not pinned so moving the mouse away still hides it
         NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification,
             object: panel,
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
-            if self.panelOpenedViaHover {
+            if self.panelOpenedViaHover && !self.sessionStore.isPinned {
+                // Keep hover tracking active — shrink notch but stay in hover mode
+                self.notchWindow?.endHover()
+            } else if self.panelOpenedViaHover {
+                // Pinned — switch to click mode
                 self.panelOpenedViaHover = false
                 self.stopHoverTracking()
-                // Panel is now in "click mode" — shrink the notch hover state
-                // since hover tracking is no longer managing it
                 self.notchWindow?.endHover()
             }
         }
@@ -111,11 +114,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.checkHoverBounds()
             return event
         }
+        // Watchdog: re-evaluate bounds every second even without mouse-move events.
+        // Prevents the panel from getting stuck open when transient conditions
+        // (dialog flips, resign-key races, still mouse outside the panel) cancel
+        // the scheduled hide and no subsequent mouse event re-triggers it.
+        hoverWatchdogTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.checkHoverBounds()
+        }
     }
 
     private func stopHoverTracking() {
         hoverHideTimer?.invalidate()
         hoverHideTimer = nil
+        hoverWatchdogTimer?.invalidate()
+        hoverWatchdogTimer = nil
         if let monitor = hoverGlobalMonitor {
             NSEvent.removeMonitor(monitor)
             hoverGlobalMonitor = nil

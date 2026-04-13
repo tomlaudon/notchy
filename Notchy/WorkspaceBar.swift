@@ -138,10 +138,7 @@ struct WorkspaceBar: View {
             .menuStyle(.borderlessButton)
             .foregroundColor(activeColor)
 
-            // Session status strip — always visible, outside the Menu
-            sessionStatusDots
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
+            // Session status strip removed — tab bar already shows this info
         }
         .background(workspaceAccentBackground)
         .sheet(isPresented: $showAddSheet) {
@@ -335,10 +332,12 @@ struct WorkspaceEditorSheet: View {
                 _ = runGit(in: repoPath, args: ["branch", branchName])
             }
 
-            // Create workspace
+            // Create workspace and its worktree
+            var ws = OdooWorkspace(name: projectName, repoPath: repoPath, port: port, colorName: color)
+            ws.expectedBranch = branchName
+            ws.ensureWorktree()
+
             DispatchQueue.main.async {
-                var ws = OdooWorkspace(name: projectName, repoPath: repoPath, port: port, colorName: color)
-                ws.expectedBranch = branchName
                 WorkspaceStore.shared.addWorkspace(ws)
                 ws.ensureContextFile()
                 SessionStore.shared.switchWorkspace(ws.id)
