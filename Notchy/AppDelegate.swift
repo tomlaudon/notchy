@@ -23,8 +23,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             setupNotchWindow()
         }
         setupHotkey()
-        // Detect in background so launch isn't blocked
-        sessionStore.detectAllXcodeProjectsAsync()
     }
 
     private func setupStatusItem() {
@@ -95,7 +93,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         showPanelBelowNotch()
         panelOpenedViaHover = true
         startHoverTracking()
-        sessionStore.detectAndSwitchAsync()
     }
 
     private func showPanelBelowNotch() {
@@ -118,9 +115,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Prevents the panel from getting stuck open when transient conditions
         // (dialog flips, resign-key races, still mouse outside the panel) cancel
         // the scheduled hide and no subsequent mouse event re-triggers it.
-        hoverWatchdogTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        // Installed on .common mode so the timer keeps ticking during menu
+        // tracking, scroll tracking, and other modal run-loop modes.
+        let watchdog = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.checkHoverBounds()
         }
+        RunLoop.main.add(watchdog, forMode: .common)
+        hoverWatchdogTimer = watchdog
     }
 
     private func stopHoverTracking() {
@@ -138,8 +139,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// True if the panel is actually blocked from hiding by a live sheet or
+    /// attached child window. We use the panel's real window state instead of
+    /// the `isShowingDialog` bool because that bool is written from several
+    /// SwiftUI @State sources and can get stuck `true` (e.g. when a tab is
+    /// torn down while its alert state was set) — which was the recurring
+    /// stuck-open cause.
+    private var panelHasLiveDialog: Bool {
+        panel.attachedSheet != nil || !(panel.childWindows?.isEmpty ?? true)
+    }
+
     private func checkHoverBounds() {
-        guard panel.isVisible, panelOpenedViaHover, !sessionStore.isPinned, !sessionStore.isShowingDialog else {
+        guard panel.isVisible, panelOpenedViaHover, !sessionStore.isPinned, !panelHasLiveDialog else {
             cancelHoverHide()
             return
         }
@@ -163,7 +174,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let mouse = NSEvent.mouseLocation
             let inNotch = self.notchWindow?.frame.insetBy(dx: -self.hoverMargin, dy: -self.hoverMargin).contains(mouse) ?? false
             let inPanel = self.panel.frame.insetBy(dx: -self.hoverMargin, dy: -self.hoverMargin).contains(mouse)
-            if !inNotch && !inPanel && !self.sessionStore.isPinned && !self.sessionStore.isShowingDialog {
+            if !inNotch && !inPanel && !self.sessionStore.isPinned && !self.panelHasLiveDialog {
                 self.panel.hidePanel()
                 self.notchWindow?.endHover()
                 self.panelOpenedViaHover = false
@@ -189,11 +200,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             stopHoverTracking()
         } else {
             panelOpenedViaHover = false
-            // Show panel immediately
             showPanelBelowStatusItem()
-
-            // Then detect projects in background
-            sessionStore.detectAndSwitchAsync()
         }
     }
 

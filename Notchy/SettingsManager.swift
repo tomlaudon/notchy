@@ -12,10 +12,6 @@ class SettingsManager {
         didSet { UserDefaults.standard.set(soundsEnabled, forKey: "soundsEnabled") }
     }
 
-    var xcodeIntegrationEnabled: Bool {
-        didSet { UserDefaults.standard.set(xcodeIntegrationEnabled, forKey: "xcodeIntegrationEnabled") }
-    }
-
     /// Default repo path for new projects
     var defaultRepoPath: String {
         didSet { UserDefaults.standard.set(defaultRepoPath, forKey: "defaultRepoPath") }
@@ -34,11 +30,9 @@ class SettingsManager {
         let defaults = UserDefaults.standard
         if defaults.object(forKey: "replaceNotch") == nil { defaults.set(true, forKey: "replaceNotch") }
         if defaults.object(forKey: "soundsEnabled") == nil { defaults.set(true, forKey: "soundsEnabled") }
-        if defaults.object(forKey: "xcodeIntegrationEnabled") == nil { defaults.set(true, forKey: "xcodeIntegrationEnabled") }
 
         showNotch = defaults.bool(forKey: "replaceNotch")
         soundsEnabled = defaults.bool(forKey: "soundsEnabled")
-        xcodeIntegrationEnabled = defaults.bool(forKey: "xcodeIntegrationEnabled")
 
         // Default repo path — falls back to ~/Projects
         defaultRepoPath = defaults.string(forKey: "defaultRepoPath")

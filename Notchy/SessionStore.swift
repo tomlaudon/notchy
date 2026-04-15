@@ -21,13 +21,11 @@ class SessionStore {
     }() {
         didSet {
             UserDefaults.standard.set(isPinned, forKey: "isPinned")
-            updatePollingTimer()
         }
     }
     var isTerminalExpanded = true
     var isWindowFocused = true
     var isShowingDialog = false
-    var hasCompletedInitialDetection = true
 
     /// The most recent checkpoint for the active session, used to show the undo button
     var lastCheckpoint: Checkpoint?
@@ -39,11 +37,6 @@ class SessionStore {
     /// Non-nil while a checkpoint operation is in progress (e.g. "Taking checkpoint…", "Restoring checkpoint…")
     var checkpointStatus: String?
 
-    /// Projects the user explicitly closed.
-    /// Value is `false` while the project is still open in Xcode (suppress recreation),
-    /// flips to `true` once we observe the project absent — next detection will recreate the tab.
-    private var dismissedProjects: [String: Bool] = [:]
-
     /// Activity token to prevent macOS idle sleep while Claude is working
     private var sleepActivity: NSObjectProtocol?
 
@@ -51,16 +44,9 @@ class SessionStore {
     private var audioPlayer: AVAudioPlayer?
     private var lastSoundPlayedAt: Date = .distantPast
 
-    /// Timer that periodically checks for new Xcode projects while pinned
-    private var pollingTimer: Timer?
-    private static let pollingInterval: TimeInterval = 5
-
     var activeSession: TerminalSession? {
         sessions.first { $0.id == activeSessionId }
     }
-
-    /// Currently open Xcode project names (refreshed on each scan)
-    var activeXcodeProjects: Set<String> = []
 
     /// The status color for the notch (matches tab bar colors)
     var notchStatusColor: NSColor {
@@ -76,7 +62,6 @@ class SessionStore {
     private static let activeSessionKey = "activeSessionId"
 
     init() {
-        updatePollingTimer()
         // Start fresh with no sessions — user picks a workspace to begin
         WorkspaceStore.shared.activeWorkspaceId = nil
         WorkspaceStore.shared.persist()
@@ -122,94 +107,12 @@ class SessionStore {
         persistSessions()
     }
 
-    /// Start or stop the polling timer based on pinned state
-    private func updatePollingTimer() {
-        pollingTimer?.invalidate()
-        pollingTimer = nil
-        // Xcode polling disabled — workspaces are managed manually
-    }
-
     /// Called when the panel gains focus
     func panelDidBecomeKey() {
-        // Xcode detection disabled — workspaces are managed manually
+        // No-op: sessions are managed manually via workspaces / quick session.
     }
 
-    /// Scans for all open Xcode projects — adds new ones, updates active set.
-    /// Runs AppleScript on a background thread to avoid blocking UI.
-    func detectAllXcodeProjectsAsync() {
-        guard SettingsManager.shared.xcodeIntegrationEnabled else { return }
-        DispatchQueue.global(qos: .userInitiated).async {
-            let projects = XcodeDetector.shared.detectAllProjects()
-            DispatchQueue.main.async {
-                self.applyDetectedProjects(projects)
-            }
-        }
-    }
-
-    /// Detect projects + auto-switch to frontmost, all async
-    func detectAndSwitchAsync() {
-        guard SettingsManager.shared.xcodeIntegrationEnabled else { return }
-        DispatchQueue.global(qos: .userInitiated).async {
-            let allProjects = XcodeDetector.shared.detectAllProjects()
-            let frontProject = XcodeDetector.shared.detectFrontmostProject()
-            DispatchQueue.main.async {
-                self.applyDetectedProjects(allProjects)
-                if let project = frontProject {
-                    _ = self.autoSwitchToProject(project)
-                }
-            }
-        }
-    }
-
-    private func applyDetectedProjects(_ projects: [XcodeProject]) {
-        let detectedNames = Set(projects.map(\.name))
-        activeXcodeProjects = detectedNames
-        hasCompletedInitialDetection = true
-
-        // Two-phase dismiss: mark absent projects, then clear ones that reappeared
-        for name in dismissedProjects.keys {
-            if !detectedNames.contains(name) {
-                dismissedProjects[name] = true  // observed absent
-            }
-        }
-        for name in detectedNames {
-            if dismissedProjects[name] == true {
-                dismissedProjects.removeValue(forKey: name)  // reappeared after absence → allow recreation
-            }
-        }
-
-
-        for project in projects {
-            guard !sessions.contains(where: { $0.projectName == project.name }),
-                  dismissedProjects[project.name] == nil else { continue }
-            let session = TerminalSession(
-                projectName: project.name,
-                projectPath: project.path,
-                workingDirectory: project.directoryPath,
-                started: false
-            )
-            sessions.append(session)
-        }
-        persistSessions()
-    }
-
-    /// Auto-switch to existing session for a project (left-click behavior).
-    /// Only switches if the session hasn't been selected before (new tab).
-    func autoSwitchToProject(_ project: XcodeProject) -> Bool {
-        guard dismissedProjects[project.name] == nil else { return false }
-
-        if let index = sessions.firstIndex(where: { $0.projectName == project.name }) {
-            // Only auto-switch to tabs the user hasn't selected yet
-            guard !sessions[index].hasBeenSelected else { return false }
-            sessions[index].hasBeenSelected = true
-            activeSessionId = sessions[index].id
-            startSessionIfNeeded(sessions[index].id)
-            return true
-        }
-        return false
-    }
-
-    /// Select a tab — auto-starts the terminal only if the project's Xcode instance is active
+    /// Select a tab — marks it active and starts the terminal if needed.
     func selectSession(_ id: UUID) {
         activeSessionId = id
         if let index = sessions.firstIndex(where: { $0.id == id }) {
@@ -487,9 +390,6 @@ class SessionStore {
     }
 
     func closeSession(_ id: UUID) {
-        if let session = sessions.first(where: { $0.id == id }) {
-            dismissedProjects[session.projectName] = false
-        }
         TerminalManager.shared.destroyTerminal(for: id)
         sessions.removeAll { $0.id == id }
         if activeSessionId == id {

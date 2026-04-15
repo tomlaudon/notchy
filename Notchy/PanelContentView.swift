@@ -44,7 +44,7 @@ struct PanelContentView: View {
     }
 
     /// When expanded + unfocused, make chrome backgrounds semi-transparent
-    /// so the user can see through to things like Xcode build status.
+    /// so the user can see through to whatever's behind the panel.
     private var chromeBackgroundOpacity: Double {
         (!sessionStore.isWindowFocused && sessionStore.isTerminalExpanded) ? 0.5 : 1.0
     }
@@ -299,9 +299,8 @@ struct PanelContentView: View {
         .clipShape(UnevenRoundedRectangle(topLeadingRadius: 8.5, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 8.5))
         .onAppear {
             sessionStore.refreshLastCheckpoint()
-        }
-        .onChange(of: sessionStore.hasCompletedInitialDetection) {
-            if sessionStore.hasCompletedInitialDetection && sessionStore.sessions.isEmpty {
+            // Give the user something to work with on first open.
+            if sessionStore.sessions.isEmpty {
                 sessionStore.createQuickSession()
             }
         }

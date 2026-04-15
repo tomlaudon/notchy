@@ -11,13 +11,13 @@ class ClickThroughTerminalView: LocalProcessTerminalView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        registerForDraggedTypes([.fileURL])
+        registerForDraggedTypes([.fileURL, .png, .tiff])
         installArrowKeyMonitor()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        registerForDraggedTypes([.fileURL])
+        registerForDraggedTypes([.fileURL, .png, .tiff])
         installArrowKeyMonitor()
     }
 
@@ -32,6 +32,15 @@ class ClickThroughTerminalView: LocalProcessTerminalView {
     private func installArrowKeyMonitor() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self, self.window?.firstResponder === self else { return event }
+
+            // When the user types anything (not just arrows) while scrolled
+            // up, snap the viewport back to the bottom so they can see their
+            // input and its echo. Skip Cmd-chords like Cmd+C so copying from
+            // scrollback doesn't yank the view.
+            let isCmdChord = !event.modifierFlags.intersection([.command]).isEmpty
+            if !isCmdChord && self.canScroll && self.scrollPosition < 1.0 {
+                self.scroll(toPosition: 1.0)
+            }
 
             let arrowCode: String?
             switch event.keyCode {
@@ -63,12 +72,64 @@ class ClickThroughTerminalView: LocalProcessTerminalView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let items = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] else {
-            return false
+        let pb = sender.draggingPasteboard
+
+        // 1. Prefer raw image data on the pasteboard (e.g. screenshot thumbnail
+        //    drag, image dragged from a browser). This preserves the full
+        //    resolution — otherwise a dragged URL can point at a thumbnail or
+        //    transient preview file, which is why `claude` complains the image
+        //    is too small.
+        if let imagePath = writePasteboardImageToTempFile(pb) {
+            let escaped = "'" + imagePath.replacingOccurrences(of: "'", with: "'\\''") + "'"
+            sendAsPaste(escaped)
+            return true
         }
-        let paths = items.map { "'" + $0.path.replacingOccurrences(of: "'", with: "'\\''") + "'" }.joined(separator: " ")
-        send(txt: paths)
-        return true
+
+        // 2. Fall back to file URLs (normal Finder drag).
+        if let items = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !items.isEmpty {
+            let paths = items.map { "'" + $0.path.replacingOccurrences(of: "'", with: "'\\''") + "'" }.joined(separator: " ")
+            sendAsPaste(paths)
+            return true
+        }
+
+        return false
+    }
+
+    /// Send text to the terminal wrapped in bracketed-paste escape sequences
+    /// when the running app has bracketed-paste mode enabled. This is what
+    /// lets `claude` recognize a dropped path as an image attachment (showing
+    /// the image name) rather than treating it as typed characters.
+    private func sendAsPaste(_ text: String) {
+        if getTerminal().bracketedPasteMode {
+            send(txt: "\u{1b}[200~" + text + "\u{1b}[201~")
+        } else {
+            send(txt: text)
+        }
+    }
+
+    /// If the pasteboard contains PNG or TIFF image data, write it as a PNG to
+    /// a temp file and return the path. Returns nil if no image data is present
+    /// or writing fails.
+    private func writePasteboardImageToTempFile(_ pb: NSPasteboard) -> String? {
+        // Read PNG data directly if available — no lossy re-encoding.
+        var pngData: Data?
+        if let data = pb.data(forType: .png) {
+            pngData = data
+        } else if let tiffData = pb.data(forType: .tiff),
+                  let rep = NSBitmapImageRep(data: tiffData) {
+            pngData = rep.representation(using: .png, properties: [:])
+        }
+
+        guard let data = pngData, !data.isEmpty else { return nil }
+
+        let filename = "notchy-drop-\(Int(Date().timeIntervalSince1970 * 1000)).png"
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(filename)
+        do {
+            try data.write(to: url)
+            return url.path
+        } catch {
+            return nil
+        }
     }
 
     /// Returns all visible lines from the terminal buffer.
@@ -115,7 +176,18 @@ class ClickThroughTerminalView: LocalProcessTerminalView {
     }
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
+        // If the user has scrolled up into the scrollback, SwiftTerm snaps the
+        // viewport back to the bottom every time new output arrives. Capture
+        // the pre-feed position so we can restore it after super runs and keep
+        // the user's view pinned while Claude is streaming.
+        let wasScrolledUp = canScroll && scrollPosition < 1.0
+        let preYDisp = getTerminal().getTopVisibleRow()
+
         super.dataReceived(slice: slice)
+
+        if wasScrolledUp && getTerminal().getTopVisibleRow() != preYDisp {
+            scrollTo(row: preYDisp)
+        }
 
         guard let id = sessionId else { return }
 
