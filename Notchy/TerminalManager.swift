@@ -341,6 +341,11 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
         return terminal.extractVisibleText()
     }
 
+    /// Returns the terminal for a session if it already exists, without creating one.
+    func terminalIfExists(for sessionId: UUID) -> LocalProcessTerminalView? {
+        terminals[sessionId]
+    }
+
     func destroyTerminal(for sessionId: UUID) {
         terminals.removeValue(forKey: sessionId)
     }

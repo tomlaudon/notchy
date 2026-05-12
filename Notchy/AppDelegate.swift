@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var panel: TerminalPanel!
@@ -44,10 +45,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: panel,
             queue: .main
         ) { [weak self] _ in
-            guard let self, !self.panel.isVisible else { return }
-            self.notchWindow?.endHover()
-            self.panelOpenedViaHover = false
-            self.stopHoverTracking()
+            guard let self else { return }
+            if !self.panel.isVisible {
+                self.notchWindow?.endHover()
+                self.panelOpenedViaHover = false
+                self.stopHoverTracking()
+                return
+            }
+            // Panel resigned key but is staying visible (pinned, dialog, etc.).
+            // If the cursor is still over the panel or the notch, the user is
+            // actively interacting — dragging in from another app can leave
+            // Notchy inactive even after the drop. Reclaim focus so keystrokes
+            // hit the terminal instead of whatever window is frontmost behind.
+            let mouse = NSEvent.mouseLocation
+            let inPanel = self.panel.frame.insetBy(dx: -self.hoverMargin, dy: -self.hoverMargin).contains(mouse)
+            let inNotch = self.notchWindow?.frame.insetBy(dx: -self.hoverMargin, dy: -self.hoverMargin).contains(mouse) ?? false
+            if inPanel || inNotch {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    NSApp.activate(ignoringOtherApps: true)
+                    self.panel.makeKeyAndOrderFront(nil)
+                    if let sid = self.sessionStore.activeSessionId,
+                       let t = TerminalManager.shared.terminalIfExists(for: sid) {
+                        self.panel.makeFirstResponder(t)
+                    }
+                }
+            }
         }
         // When panel becomes key (user clicked on it), keep hover tracking
         // if not pinned so moving the mouse away still hides it
@@ -150,14 +173,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func checkHoverBounds() {
+        let mouse = NSEvent.mouseLocation
+        let inNotch = notchWindow?.frame.insetBy(dx: -hoverMargin, dy: -hoverMargin).contains(mouse) ?? false
+        let inPanel = panel.frame.insetBy(dx: -hoverMargin, dy: -hoverMargin).contains(mouse)
+
         guard panel.isVisible, panelOpenedViaHover, !sessionStore.isPinned, !panelHasLiveDialog else {
             cancelHoverHide()
             return
         }
-
-        let mouse = NSEvent.mouseLocation
-        let inNotch = notchWindow?.frame.insetBy(dx: -hoverMargin, dy: -hoverMargin).contains(mouse) ?? false
-        let inPanel = panel.frame.insetBy(dx: -hoverMargin, dy: -hoverMargin).contains(mouse)
 
         if inNotch || inPanel {
             cancelHoverHide()
