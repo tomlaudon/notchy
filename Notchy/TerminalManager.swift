@@ -4,6 +4,8 @@ import SwiftTerm
 class ClickThroughTerminalView: LocalProcessTerminalView {
     var sessionId: UUID?
     private var keyMonitor: Any?
+    private var scrollMonitor: Any?
+    private var lastWheelAt: Date?
     private var statusDebounceWork: DispatchWorkItem?
     private static let statusQueue = DispatchQueue(label: "com.notchy.status", qos: .utility)
 
@@ -13,17 +15,77 @@ class ClickThroughTerminalView: LocalProcessTerminalView {
         super.init(frame: frame)
         registerForDraggedTypes([.fileURL, .png, .tiff])
         installArrowKeyMonitor()
+        installScrollMonitor()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         registerForDraggedTypes([.fileURL, .png, .tiff])
         installArrowKeyMonitor()
+        installScrollMonitor()
     }
 
     deinit {
         if let monitor = keyMonitor {
             NSEvent.removeMonitor(monitor)
+        }
+        if let monitor = scrollMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+    }
+
+    /// Make the scroll wheel/trackpad scroll the terminal again.
+    ///
+    /// SwiftTerm's own `scrollWheel` only scrolls its scrollback buffer and
+    /// never reports the wheel to the running program. That's fine at a plain
+    /// shell, but Claude Code's TUI runs on the alternate screen (no
+    /// scrollback) and turns on mouse tracking — so the wheel does nothing.
+    /// We intercept scroll events and:
+    ///   • scroll SwiftTerm's buffer when there's real scrollback, else
+    ///   • synthesize wheel-button mouse reports for an app that asked for
+    ///     mouse tracking (Claude), else
+    ///   • send cursor up/down keys ("alternate scroll", e.g. less/vim).
+    private func installScrollMonitor() {
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self = self else { return event }
+            guard let win = self.window, event.window === win else { return event }
+            let pointInView = self.convert(event.locationInWindow, from: nil)
+            guard self.bounds.contains(pointInView) else { return event }
+
+            let delta = event.hasPreciseScrollingDeltas ? Double(event.scrollingDeltaY) : Double(event.deltaY)
+            if delta == 0 { return event }
+            let goingUp = delta > 0
+
+            // Real scrollback (normal buffer, e.g. plain shell): drive viewport.
+            if self.canScroll {
+                let step = event.hasPreciseScrollingDeltas
+                    ? Double(event.scrollingDeltaY) / Double(max(self.frame.height, 1))
+                    : Double(event.deltaY) * 0.06
+                self.scroll(toPosition: min(1.0, max(0.0, self.scrollPosition - step)))
+                return nil
+            }
+
+            let term = self.getTerminal()
+            // App with mouse tracking on (Claude): synthesize wheel-button
+            // reports. Throttle — the trackpad fires ~30 events/gesture.
+            if term.mouseMode != .off {
+                let now = Date()
+                if let last = self.lastWheelAt, now.timeIntervalSince(last) < 0.05 { return nil }
+                self.lastWheelAt = now
+                let cols = max(term.cols, 1), rows = max(term.rows, 1)
+                let col = min(cols - 1, max(0, Int(pointInView.x / max(self.frame.width / CGFloat(cols), 1))))
+                let yFromTop = self.isFlipped ? pointInView.y : (self.frame.height - pointInView.y)
+                let row = min(rows - 1, max(0, Int(yFromTop / max(self.frame.height / CGFloat(rows), 1))))
+                let flags = term.encodeButton(button: goingUp ? 4 : 5, release: false, shift: false, meta: false, control: false)
+                term.sendEvent(buttonFlags: flags, x: col, y: row)
+                return nil
+            }
+
+            // Alternate screen, no mouse tracking: emulate alternate-scroll.
+            let lines = max(1, min(4, Int(abs(delta).rounded(.up))))
+            let seq = goingUp ? "\u{1b}[A" : "\u{1b}[B"
+            for _ in 0..<lines { self.send(txt: seq) }
+            return nil
         }
     }
 
