@@ -273,6 +273,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Notchy;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Notchy needs microphone access so the terminal app running inside it (e.g. Claude Code voice input) can record audio.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -310,6 +311,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Notchy;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Notchy needs microphone access so the terminal app running inside it (e.g. Claude Code voice input) can record audio.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

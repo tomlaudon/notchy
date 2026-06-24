@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import AVFoundation
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
@@ -24,6 +25,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             setupNotchWindow()
         }
         setupHotkey()
+        requestMicrophoneAccess()
+    }
+
+    /// Claude Code's voice input records audio from a process we spawn, and
+    /// macOS attributes that microphone access to Notchy (the responsible app),
+    /// not to "Claude" — SwiftTerm's posix_spawn doesn't disclaim TCC
+    /// responsibility. So Notchy itself must hold the mic grant. This requires
+    /// the `com.apple.security.device.audio-input` entitlement (hardened runtime
+    /// auto-denies without it) plus NSMicrophoneUsageDescription. We trigger the
+    /// system prompt here; once granted, the child `claude` process inherits it.
+    /// Note: because the app is ad-hoc signed, the grant is reset on each rebuild
+    /// and must be re-allowed.
+    private func requestMicrophoneAccess() {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined else { return }
+        // Accessory (LSUIElement) apps can have the prompt suppressed; briefly
+        // become a regular app and activate so it can present, then restore.
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        AVCaptureDevice.requestAccess(for: .audio) { _ in
+            DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
+        }
     }
 
     private func setupStatusItem() {
